@@ -1,0 +1,4 @@
+This is forked repository from https://github.com/jirislaby/LLVMSlicer.
+The changes are:
+  * Port to LLVM make build system
+  * TODO: add forward slicing part, provide more options
