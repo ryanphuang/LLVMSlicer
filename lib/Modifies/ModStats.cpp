@@ -8,9 +8,9 @@
 #include "llvm/Support/InstIterator.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Callgraph/Callgraph.h"
-#include "PointsTo/PointsTo.h"
-#include "Slicing/Prepare.h"
+#include "Callgraph.h"
+#include "PointsTo.h"
+#include "Prepare.h"
 
 using namespace llvm;
 

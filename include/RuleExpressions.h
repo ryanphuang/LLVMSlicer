@@ -11,7 +11,7 @@
 #include "llvm/Function.h"
 #include "llvm/Instructions.h"
 
-#include "../Languages/LLVM.h"
+#include "LLVM.h"
 
 namespace llvm { namespace ptr {
 
@@ -182,7 +182,7 @@ namespace llvm { namespace ptr {
 	RCT_DREF_VAR_ASGN_VAR,
 	RCT_DREF_VAR_ASGN_REF_VAR,
 	RCT_DREF_VAR_ASGN_DREF_VAR,
-	RCT_DEALLOC,
+	RCT_DEALLOC
     };
 
     struct RuleCode

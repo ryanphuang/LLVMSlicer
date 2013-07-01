@@ -9,8 +9,8 @@
 #include "llvm/Instructions.h"
 #include "llvm/Module.h"
 
-#include "../Callgraph/Callgraph.h"
-#include "../PointsTo/PointsTo.h"
+#include "Callgraph.h"
+#include "PointsTo.h"
 #include "Modifies.h"
 
 using namespace llvm;

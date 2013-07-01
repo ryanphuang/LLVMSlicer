@@ -10,7 +10,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Support/InstIterator.h"
 
-#include "../PointsTo/PointsTo.h"
+#include "PointsTo.h"
 #include "PostDominanceFrontier.h"
 
 namespace llvm { namespace slicing {

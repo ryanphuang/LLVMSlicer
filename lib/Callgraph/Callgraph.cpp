@@ -1,7 +1,7 @@
 // This file is distributed under the University of Illinois Open Source
 // License. See LICENSE.TXT for details.
 
-#include "../PointsTo/PointsTo.h"
+#include "PointsTo.h"
 #include "Callgraph.h"
 
 using namespace llvm;

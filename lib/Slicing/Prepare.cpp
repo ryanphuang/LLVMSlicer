@@ -14,14 +14,14 @@
 #include "llvm/Instructions.h"
 #include "llvm/Module.h"
 #include "llvm/Pass.h"
-#include "llvm/TypeBuilder.h"
+#include "llvm/Support/TypeBuilder.h"
 #include "llvm/Support/InstIterator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Type.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
-#include "../Callgraph/Callgraph.h"
-#include "../PointsTo/PointsTo.h"
+#include "Callgraph.h"
+#include "PointsTo.h"
 
 using namespace llvm;
 
@@ -59,8 +59,8 @@ static GlobalVariable *getAiVar(Function &F, const CallInst *CI) {
   const GlobalVariable *strVar =
     dyn_cast<const GlobalVariable>(GEP->getOperand(0));
   assert(strVar && strVar->hasInitializer());
-  const ConstantDataArray *str =
-    dyn_cast<const ConstantDataArray>(strVar->getInitializer());
+  const ConstantArray *str =
+    dyn_cast<const ConstantArray>(strVar->getInitializer());
   assert(str && str->isCString());
   std::string id = str->getAsCString();
   char *cstr = new char[11 + id.size() + 1];

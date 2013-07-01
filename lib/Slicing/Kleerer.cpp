@@ -4,16 +4,16 @@
 #include "llvm/Pass.h"
 #include "llvm/PassManager.h"
 #include "llvm/Module.h"
-#include "llvm/DataLayout.h"
-#include "llvm/TypeBuilder.h"
+#include "llvm/Target/TargetData.h"
+#include "llvm/Support/TypeBuilder.h"
 #include "llvm/Analysis/Verifier.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/Support/InstIterator.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Callgraph/Callgraph.h"
-#include "PointsTo/PointsTo.h"
-#include "Slicing/Prepare.h"
+#include "Callgraph.h"
+#include "PointsTo.h"
+#include "Prepare.h"
 
 using namespace llvm;
 
@@ -28,14 +28,14 @@ namespace {
 
     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
       AU.setPreservesAll();
-      AU.addRequired<DataLayout>();
+      AU.addRequired<TargetData>();
     }
   };
 }
 
 class Kleerer {
 public:
-  Kleerer(ModulePass &modPass, Module &M, DataLayout &TD,
+  Kleerer(ModulePass &modPass, Module &M, TargetData &TD,
           callgraph::Callgraph &CG) : modPass(modPass),
       M(M), TD(TD), CG(CG), C(M.getContext()), intPtrTy(TD.getIntPtrType(C)),
       done(false) {
@@ -49,7 +49,7 @@ public:
 private:
   ModulePass &modPass;
   Module &M;
-  DataLayout &TD;
+  TargetData &TD;
   callgraph::Callgraph &CG;
   LLVMContext &C;
   IntegerType *intPtrTy;
@@ -106,7 +106,7 @@ static void check(Value *Func, ArrayRef<Value *> Args) {
   }
 }
 
-static unsigned getTypeSize(DataLayout &TD, Type *type) {
+static unsigned getTypeSize(TargetData &TD, Type *type) {
   if (type->isFunctionTy()) /* it is not sized, weird */
     return TD.getPointerSize();
 
@@ -128,7 +128,7 @@ Instruction *Kleerer::createMalloc(BasicBlock *BB, Type *type,
 
 static Constant *getGlobalString(LLVMContext &C, Module &M,
                                  const StringRef &str) {
-  Constant *strArray = ConstantDataArray::getString(C, str);
+  Constant *strArray = ConstantArray::get(C, str);
   GlobalVariable *strVar =
         new GlobalVariable(M, strArray->getType(), true,
                            GlobalValue::PrivateLinkage, strArray, "");
@@ -191,8 +191,7 @@ void Kleerer::makeGlobalsSymbolic(Module &M, BasicBlock *BB) {
 Constant *Kleerer::get_assert_fail()
 {
   Type *constCharPtrTy = TypeBuilder<const char *, false>::get(C);
-  AttrListPtr attrs = AttrListPtr().addAttr(C, ~0,
-		  Attributes::get(C, Attributes::NoReturn));
+  AttrListPtr attrs = attrs.addAttr(~0, Attribute::NoReturn);
   return M.getOrInsertFunction("__assert_fail", attrs, Type::getVoidTy(C),
                                constCharPtrTy, constCharPtrTy, uintType,
                                constCharPtrTy, NULL);
@@ -339,7 +338,7 @@ void Kleerer::prepareArguments(Function &F, BasicBlock *mainBB,
 }
 
 void Kleerer::writeMain(Function &F) {
-  std::string name = M.getModuleIdentifier() + ".main." + F.getName().str() + ".o";
+  std::string name = M.getModuleIdentifier() + ".main." + F.getNameStr() + ".o";
   Function *mainFun = Function::Create(TypeBuilder<int(), false>::get(C),
                     GlobalValue::ExternalLinkage, "main", &M);
   BasicBlock *mainBB = BasicBlock::Create(C, "entry", mainFun);
@@ -430,7 +429,7 @@ bool Kleerer::run() {
 }
 
 bool KleererPass::runOnModule(Module &M) {
-  DataLayout &TD = getAnalysis<DataLayout>();
+  TargetData &TD = getAnalysis<TargetData>();
   ptr::PointsToSets PS;
   {
     ptr::ProgramStructure P(M);
