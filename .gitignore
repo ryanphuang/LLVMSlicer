@@ -3,6 +3,12 @@
 *.o.post
 main.*.c
 Project.layout
+Debug\+Asserts
+autom4te.cache
+autoconf/configure.bak
+config.log
+config.status
+.*\.swp$
 
 CMakeFiles/
 cmake_install.cmake
