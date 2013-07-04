@@ -5,13 +5,24 @@
 #include "llvm/Function.h"
 #include "llvm/Pass.h"
 #include "llvm/Value.h"
+#include "llvm/Support/CommandLine.h"
 
 #include "Callgraph.h"
 #include "Modifies.h"
 #include "PointsTo.h"
 #include "StaticSlicer.h"
+#include "Matcher.h"
 
 using namespace llvm;
+
+static cl::opt<std::string>
+FileName("criterion-file", cl::desc("File name of slicing criterion"));
+
+static cl::opt<int>
+LineNumber("criterion-line", cl::desc("Line number of slicing criterion"));
+
+static cl::opt<std::string>
+SlicingVariable("criterion-variable", cl::desc("Variable name of slicing criterion"));
 
 namespace llvm { namespace slicing { namespace detail {
 
@@ -33,6 +44,11 @@ namespace llvm { namespace slicing { namespace detail {
 }}}
 
 namespace llvm { namespace slicing {
+  
+  void StaticSlicer::parseInitialCriterion()
+  {
+
+  }
 
   void StaticSlicer::buildDicts(const ptr::PointsToSets &PS)
   {
@@ -66,13 +82,47 @@ namespace llvm { namespace slicing {
   StaticSlicer::StaticSlicer(ModulePass *MP, Module &M,
       const ptr::PointsToSets &PS,
       const callgraph::Callgraph &CG,
-      const mods::Modifies &MOD) : MP(MP), module(M),
-  slicers(), initFuns(), funcsToCalls(),
-  callsToFuncs() {
-    for (Module::iterator f = M.begin(); f != M.end(); ++f)
-      if (!f->isDeclaration() && !memoryManStuff(&*f))
-        runFSS(*f, PS, CG, MOD);
-    buildDicts(PS);
+      const mods::Modifies &MOD) : mp(MP), module(M),
+slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD) {
+    Matcher matcher(M);
+    Matcher::sp_iterator si = matcher.setSourceFile(FileName);
+    if (si == matcher.sp_end()) {
+      errs() << "No matching subprogram at " << FileName << ":" << LineNumber << " found\n";
+      return;
+    }
+    Scope scope(LineNumber, LineNumber);
+    bool multiple;
+    Function * F = matcher.matchFunction(si, scope, multiple); 
+    if (F == NULL) {
+      errs() << "No matching function at " << FileName << ":" << LineNumber << " found\n";
+      return;
+    }
+    errs() << "Matching function: " << F->getName() << "\n";
+    FunctionStaticSlicer *FSS = new FunctionStaticSlicer(*F, mp, ps, mod);
+    Instruction *inst;
+    inst_iterator ii = inst_begin(F);
+    bool found = false;
+    while ((inst = matcher.matchInstruction(ii, F, scope)) != NULL) {
+      const Value *LHS = NULL;
+      if (const LoadInst *LI = dyn_cast<LoadInst>(inst)) {
+        LHS = LI->getPointerOperand();
+      } else if (const StoreInst * SI = dyn_cast<StoreInst>(inst)) {
+        LHS = SI->getPointerOperand();
+      }
+      if (LHS && LHS->hasName() && LHS->getName().equals_lower(SlicingVariable)) {
+        errs() << "Matching instruction: \n";
+        inst->dump();
+        FSS->addInitialCriterion(inst, LHS);
+        found = true;
+      }
+    }
+    if (!found) {
+      errs() << "No matching instruction for variable " << SlicingVariable << "\n";
+      return;
+    }
+    initFuns.push_back(F);
+    slicers.insert(Slicers::value_type(F, FSS));
+    buildDicts(ps);
   }
 
   StaticSlicer::~StaticSlicer() {
@@ -81,23 +131,16 @@ namespace llvm { namespace slicing {
       delete I->second;
   }
 
-  void StaticSlicer::runFSS(Function &F, const ptr::PointsToSets &PS,
-      const callgraph::Callgraph &CG,
-      const mods::Modifies &MOD) {
-    callgraph::Callgraph::range_iterator callees = CG.callees(&F);
-    bool starting = std::distance(callees.first, callees.second) == 0;
-
-    FunctionStaticSlicer *FSS = new FunctionStaticSlicer(F, MP, PS, MOD);
-    bool hadAssert = slicing::findInitialCriterion(F, *FSS, starting);
-
-    /*
-     * Functions with an assert might not have a return and slicer wouldn't
-     * compute them at all in that case.
-     */
-    if (starting || hadAssert)
-      initFuns.push_back(&F);
-
-    slicers.insert(Slicers::value_type(&F, FSS));
+  FunctionStaticSlicer * StaticSlicer::getFSS(const Function * F) {
+    Slicers::iterator si;
+    si = slicers.find(F);
+    if (si == slicers.end()) {
+      Function *f = const_cast<Function *>(F);
+      FunctionStaticSlicer *FSS = new FunctionStaticSlicer(*f, mp, ps, mod);
+      slicers.insert(Slicers::value_type(F, FSS));
+      return FSS;
+    }
+    return si->second;
   }
 
   void StaticSlicer::computeSlice() {
@@ -105,11 +148,13 @@ namespace llvm { namespace slicing {
     WorkSet Q(initFuns);
 
     while (!Q.empty()) {
-      for (WorkSet::const_iterator f = Q.begin(); f != Q.end(); ++f)
-        slicers[*f]->calculateStaticSlice();
+      for (WorkSet::iterator f = Q.begin(); f != Q.end(); ++f) {
+        FunctionStaticSlicer *fss = getFSS(*f);
+        fss->calculateStaticSlice();
+      }
 
       WorkSet tmp;
-      for (WorkSet::const_iterator f = Q.begin(); f != Q.end(); ++f) {
+      for (WorkSet::iterator f = Q.begin(); f != Q.end(); ++f) {
         emitToCalls(*f, std::inserter(tmp, tmp.end()));
         emitToExits(*f, std::inserter(tmp, tmp.end()));
       }
@@ -124,7 +169,7 @@ namespace llvm { namespace slicing {
     if (modified)
       for (Module::iterator I = module.begin(), E = module.end(); I != E; ++I)
         if (!I->isDeclaration())
-          FunctionStaticSlicer::removeUndefs(MP, *I);
+          FunctionStaticSlicer::removeUndefs(mp, *I);
     return modified;
   }
 }}
@@ -165,5 +210,6 @@ bool Slicer::runOnModule(Module &M) {
 
   slicing::StaticSlicer SS(this, M, PS, CG, MOD);
   SS.computeSlice();
-  return SS.sliceModule();
+  return false;
+  // return SS.sliceModule();
 }

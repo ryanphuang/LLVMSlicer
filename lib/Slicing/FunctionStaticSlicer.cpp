@@ -13,6 +13,7 @@
 #include <ctype.h>
 #include <map>
 
+#include "llvm/IntrinsicInst.h"
 #include "llvm/Constants.h"
 #include "llvm/Function.h"
 #include "llvm/GlobalVariable.h"
@@ -37,6 +38,9 @@
 
 using namespace llvm;
 using namespace llvm::slicing;
+
+#define DEBUG_INITCRIT
+#define DEBUG_SLICE
 
 InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
     const mods::Modifies &MOD) : ins(i), sliced(true) {
@@ -454,7 +458,6 @@ static bool canSlice(const Instruction &i) {
     case Instruction::Alloca:
     case Instruction::Ret:
     case Instruction::Unreachable:
-      return false;
     case Instruction::Br:
     case Instruction::Switch:
       return false;
@@ -463,15 +466,15 @@ static bool canSlice(const Instruction &i) {
 }
 
 void FunctionStaticSlicer::dump() {
-#ifdef DEBUG_DUMP
+  errs() << "Final slice:\n";
   for (inst_iterator I = inst_begin(fun), E = inst_end(fun); I != E; I++) {
     const Instruction &i = *I;
     const InsInfo *ii = getInsInfo(&i);
-    i.print(errs());
-    errs() << "\n    ";
-    if (!ii->isSliced() || !canSlice(i))
-      errs() << "UN";
-    errs() << "SLICED\n    DEF:\n";
+    if (ii->isSliced()) // skip removed inst
+      continue;
+    i.dump();
+#ifdef DEBUG_DUMP
+    errs() << "    DEF:\n";
     for (ValSet::const_iterator II = ii->DEF_begin(), EE = ii->DEF_end();
         II != EE; II++) {
       errs() << "      ";
@@ -489,8 +492,8 @@ void FunctionStaticSlicer::dump() {
       errs() << "      ";
       (*II)->dump();
     }
-  }
 #endif
+  }
 }
 
 /**
@@ -498,27 +501,27 @@ void FunctionStaticSlicer::dump() {
  */
 void FunctionStaticSlicer::calculateStaticSlice() {
 #ifdef DEBUG_SLICE
-  errs() << __func__ << " ============ BEG\n";
+  errs() << " ============ BEG: slicing '" << fun.getName() << "'\n";
 #endif
   do {
 #ifdef DEBUG_SLICE
-    errs() << __func__ << " ======= compute RC\n";
+    errs() << " ------- step 1: compute RC...\n";
 #endif
     computeRC();
 #ifdef DEBUG_SLICE
-    errs() << __func__ << " ======= compute SC\n";
+    errs() << " ------- step 2: compute SC...\n";
 #endif
     computeSC();
 
 #ifdef DEBUG_SLICE
-    errs() << __func__ << " ======= compute BC\n";
+    errs() << " ------- step 3: compute BC...\n";
 #endif
   } while (computeBC());
 
   dump();
 
 #ifdef DEBUG_SLICE
-  errs() << __func__ << " ============ END\n";
+  errs() << " ============ END: slicing '" << fun.getName() << "'\n";
 #endif
 }
 
@@ -681,25 +684,24 @@ bool llvm::slicing::findInitialCriterion(Function &F,
 #ifdef DEBUG_INITCRIT
   errs() << __func__ << " ============ BEGIN\n";
 #endif
-  const Function *F__assert_fail = F.getParent()->getFunction("__assert_fail");
-  if (!F__assert_fail) /* no cookies in this module */
-    return false;
 
   for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
     const Instruction *i = &*I;
+    i->dump();
     if (const StoreInst *SI = dyn_cast<StoreInst>(i)) {
       const Value *LHS = SI->getPointerOperand();
-      if (LHS->hasName() && LHS->getName().startswith("__ai_state_")) {
+      if (LHS->hasName() && LHS->getName().startswith("product")) {
 #ifdef DEBUG_INITCRIT
         errs() << "    adding\n";
 #endif
         ss.addInitialCriterion(SI, LHS);
       }
-    } else if (const CallInst *CI = dyn_cast<CallInst>(i)) {
+    /* } else if (const CallInst *CI = dyn_cast<CallInst>(i)) {
       Function *callie = CI->getCalledFunction();
       if (callie == F__assert_fail) {
         added = handleAssert(F, ss, CI);
       }
+      */
     } else if (const ReturnInst *RI = dyn_cast<ReturnInst>(i)) {
       if (starting) {
         const Module *M = F.getParent();

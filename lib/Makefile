@@ -8,6 +8,6 @@ LEVEL=..
 #
 # List all of the subdirectories that we will compile.
 #
-DIRS=Callgraph Languages Modifies PointsTo Slicing
+DIRS=Callgraph Languages Modifies PointsTo Matcher Slicing
 
 include $(LEVEL)/Makefile.common

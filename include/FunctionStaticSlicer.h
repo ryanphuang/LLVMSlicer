@@ -7,6 +7,7 @@
 #include <map>
 
 #include "llvm/Value.h"
+#include "llvm/IntrinsicInst.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Support/InstIterator.h"
 
@@ -75,6 +76,10 @@ public:
   template<typename FwdValueIterator>
   bool addCriterion(const llvm::Instruction *ins, FwdValueIterator b,
 		    FwdValueIterator const e, bool desliceIfChanged = false) {
+    if (isa<IntrinsicInst>(ins)) {
+      errs() << "skip intrinsic inst\n";
+      return false;
+    }
     InsInfo *ii = getInsInfo(ins);
     bool change = false;
     for (; b != e; ++b)
@@ -127,6 +132,10 @@ private:
 
   InsInfo *getInsInfo(const llvm::Instruction *i) const {
     InsInfoMap::const_iterator I = insInfoMap.find(i);
+    if (I == insInfoMap.end()) {
+      errs() << "Reaching end of ins info map: \n";
+      i->dump();
+    }
     assert(I != insInfoMap.end());
     return I->second;
   }

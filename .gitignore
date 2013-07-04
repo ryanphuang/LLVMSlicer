@@ -8,7 +8,7 @@ autom4te.cache
 autoconf/configure.bak
 config.log
 config.status
-.*\.swp$
+*.swp
 
 CMakeFiles/
 cmake_install.cmake

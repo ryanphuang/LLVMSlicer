@@ -39,6 +39,9 @@ namespace llvm { namespace slicing {
     private:
       typedef llvm::SmallVector<const llvm::Function *, 20> InitFuns;
 
+      void parseInitialCriterion();
+
+      FunctionStaticSlicer * getFSS(const Function * F);
       void buildDicts(const ptr::PointsToSets &PS);
 
       template<typename OutIterator>
@@ -47,15 +50,16 @@ namespace llvm { namespace slicing {
       template<typename OutIterator>
         void emitToExits(llvm::Function const* const f, OutIterator out);
 
-      void runFSS(Function &F, const ptr::PointsToSets &PS,
-          const callgraph::Callgraph &CG, const mods::Modifies &MOD);
-
-      ModulePass *MP;
+      ModulePass *mp;
       Module &module;
       Slicers slicers;
       InitFuns initFuns;
       FuncsToCalls funcsToCalls;
       CallsToFuncs callsToFuncs;
+      const ptr::PointsToSets & ps;
+      const callgraph::Callgraph & cg;
+      const mods::Modifies & mod;
+
   };
 
 
@@ -121,20 +125,20 @@ namespace llvm { namespace slicing {
   template<typename OutIterator>
     void StaticSlicer::emitToCalls(llvm::Function const* const f,
         OutIterator out) {
+      FunctionStaticSlicer * fss = getFSS(f);
       const ValSet::const_iterator relBgn =
-        slicers[f]->relevant_begin(getFunctionEntry(f));
+        fss->relevant_begin(getFunctionEntry(f));
       const ValSet::const_iterator relEnd =
-        slicers[f]->relevant_end(getFunctionEntry(f));
+        fss->relevant_end(getFunctionEntry(f));
       FuncsToCalls::const_iterator c, e;
       llvm::tie(c,e) = funcsToCalls.equal_range(f);
       for ( ; c != e; ++c) {
         const llvm::CallInst *CI = c->second;
         const llvm::Function *g = CI->getParent()->getParent();
-        FunctionStaticSlicer *FSS = slicers[g];
+        FunctionStaticSlicer *FSS = getFSS(g);
         std::set<const llvm::Value *> R;
         detail::getRelevantVarsAtCall(c->second, f, relBgn, relEnd,
             std::inserter(R, R.end()));
-
         if (FSS->addCriterion(CI, R.begin(), R.end(),
               !FSS->shouldSkipAssert(CI))) {
           FSS->addCriterion(CI, FSS->REF_begin(CI), FSS->REF_end(CI));
@@ -149,11 +153,12 @@ namespace llvm { namespace slicing {
       typedef std::vector<const llvm::CallInst *> CallsVec;
       CallsVec C;
       getFunctionCalls(f, std::back_inserter(C));
+      FunctionStaticSlicer * fss = getFSS(f);
       for (CallsVec::const_iterator c = C.begin(); c != C.end(); ++c) {
         const ValSet::const_iterator relBgn =
-          slicers[f]->relevant_begin(getSuccInBlock(*c));
+          fss->relevant_begin(getSuccInBlock(*c));
         const ValSet::const_iterator relEnd =
-          slicers[f]->relevant_end(getSuccInBlock(*c));
+          fss->relevant_end(getSuccInBlock(*c));
         CallsToFuncs::const_iterator g, e;
         llvm::tie(g, e) = callsToFuncs.equal_range(*c);
         for ( ; g != e; ++g) {
@@ -165,7 +170,8 @@ namespace llvm { namespace slicing {
             std::set<const llvm::Value *> R;
             detail::getRelevantVarsAtExit(*c, *e, relBgn, relEnd,
                 std::inserter(R, R.end()));
-            if (slicers[g->second]->addCriterion(*e, R.begin(),R .end()))
+            FunctionStaticSlicer * FSS = getFSS(g->second);
+            if (FSS->addCriterion(*e, R.begin(),R .end()))
               *out++ = g->second;
           }
         }
