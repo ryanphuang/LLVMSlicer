@@ -24,6 +24,10 @@ LineNumber("criterion-line", cl::desc("Line number of slicing criterion"));
 static cl::opt<std::string>
 SlicingVariable("criterion-variable", cl::desc("Variable name of slicing criterion"));
 
+static cl::opt<bool>
+OutputLine("output-line",
+           cl::desc("Instead of output the slice as instructions, output the line numbers."));
+
 namespace llvm { namespace slicing { namespace detail {
 
   void fillParamsToArgs(CallInst const* const C,
@@ -83,8 +87,7 @@ namespace llvm { namespace slicing {
       const ptr::PointsToSets &PS,
       const callgraph::Callgraph &CG,
       const mods::Modifies &MOD) : mp(MP), module(M),
-slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD) {
-    Matcher matcher(M);
+slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD), matcher(M) {
     Matcher::sp_iterator si = matcher.setSourceFile(FileName);
     if (si == matcher.sp_end()) {
       errs() << "No matching subprogram at " << FileName << ":" << LineNumber << " found\n";
@@ -151,6 +154,7 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD) 
       for (WorkSet::iterator f = Q.begin(); f != Q.end(); ++f) {
         FunctionStaticSlicer *fss = getFSS(*f);
         fss->calculateStaticSlice();
+        fss->dump(matcher, OutputLine);
       }
 
       WorkSet tmp;

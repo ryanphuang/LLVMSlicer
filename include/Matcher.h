@@ -121,6 +121,7 @@ class Matcher {
     std::string filename;
     const char *patchname;
     Module & module;
+    DebugInfoFinder Finder;
 
   public:
     std::vector<DISPCopy> MySPs;
@@ -137,12 +138,17 @@ class Matcher {
       initialized = false;
       processCompileUnits(M); 
       processed = true;
+      Finder.processModule(M); // dummy
     }
     //Matcher() {initialized = false; processed = false; patchstrips = 0; debugstrips = 0; }
 
     sp_iterator setSourceFile(StringRef);
     Function * matchFunction(sp_iterator &, Scope &, bool &);
     Instruction * matchInstruction(inst_iterator &, Function *, Scope &);
+
+    // use off-the-shelf DebugInfoFinder to find the MDNode of a function
+    MDNode *getFunctionMD(const Function *F); 
+
 
     void process(Module &M) 
     { 

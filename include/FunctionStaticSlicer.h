@@ -12,6 +12,7 @@
 #include "llvm/Support/InstIterator.h"
 
 #include "PointsTo.h"
+#include "Matcher.h"
 #include "PostDominanceFrontier.h"
 
 namespace llvm { namespace slicing {
@@ -98,6 +99,7 @@ public:
     ii->deslice();
   }
   void calculateStaticSlice();
+  void dump(Matcher &matcher, bool outputline = false);
   bool slice();
   static void removeUndefs(ModulePass *MP, Function &F);
 
@@ -128,7 +130,6 @@ private:
   bool updateRCSC(llvm::PostDominanceFrontier::DomSetType::const_iterator start,
                   llvm::PostDominanceFrontier::DomSetType::const_iterator end);
 
-  void dump();
 
   InsInfo *getInsInfo(const llvm::Instruction *i) const {
     InsInfoMap::const_iterator I = insInfoMap.find(i);

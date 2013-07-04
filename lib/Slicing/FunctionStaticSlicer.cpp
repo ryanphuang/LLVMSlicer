@@ -12,6 +12,8 @@
 
 #include <ctype.h>
 #include <map>
+#include <set>
+#include <list>
 
 #include "llvm/IntrinsicInst.h"
 #include "llvm/Constants.h"
@@ -28,6 +30,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
+#include "Matcher.h"
 #include "PostDominanceFrontier.h"
 #include "Callgraph.h"
 #include "Modifies.h"
@@ -39,8 +42,7 @@
 using namespace llvm;
 using namespace llvm::slicing;
 
-#define DEBUG_INITCRIT
-#define DEBUG_SLICE
+// #define DEBUG_SLICE
 
 InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
     const mods::Modifies &MOD) : ins(i), sliced(true) {
@@ -465,14 +467,53 @@ static bool canSlice(const Instruction &i) {
   return true;
 }
 
-void FunctionStaticSlicer::dump() {
-  errs() << "Final slice:\n";
+
+// a simple function 'prototype' printer
+void printFuncProtoType(Function *F)
+{
+  F->getReturnType()->dump();
+  errs() << " " << F->getName() << "(";
+  FunctionType * FTY = F->getFunctionType();
+  unsigned params = FTY->getNumParams();
+  unsigned i;
+  for (i = 0; i < params; i++) {
+    FTY->getParamType(i)->dump();
+    if (i != params - 1)
+      errs() << ",";
+  }
+  errs() << ")";
+}
+
+void FunctionStaticSlicer::dump(Matcher &matcher, bool outputline) {
+  errs() << "slice in '";
+  printFuncProtoType(&fun);
+  /*
+  MDNode * md = matcher.getFunctionMD(&fun);
+  if (md == NULL) {
+    printFuncProtoType(&fun);
+  }
+  else {
+    DISubprogram S(md);
+    errs() << S.getLinkageName();
+  }
+  */
+  errs() << "': ";
+  if (outputline)
+    errs() << "[";
+  std::set<unsigned> lines;
   for (inst_iterator I = inst_begin(fun), E = inst_end(fun); I != E; I++) {
     const Instruction &i = *I;
     const InsInfo *ii = getInsInfo(&i);
     if (ii->isSliced()) // skip removed inst
       continue;
-    i.dump();
+    if (outputline) {
+      unsigned line = ScopeInfoFinder::getInstLine(&i);
+      if (line != 0) {
+        lines.insert(line);
+      }
+    }
+    else
+      i.dump();
 #ifdef DEBUG_DUMP
     errs() << "    DEF:\n";
     for (ValSet::const_iterator II = ii->DEF_begin(), EE = ii->DEF_end();
@@ -493,6 +534,15 @@ void FunctionStaticSlicer::dump() {
       (*II)->dump();
     }
 #endif
+  }
+  if (outputline) {
+    std::set<unsigned>::iterator li; 
+    for (li = lines.begin(); li != lines.end();) {
+      errs() << *li;
+      if (++li != lines.end())
+        errs() << ",";
+    }
+    errs() << "]\n";
   }
 }
 
@@ -517,8 +567,6 @@ void FunctionStaticSlicer::calculateStaticSlice() {
     errs() << " ------- step 3: compute BC...\n";
 #endif
   } while (computeBC());
-
-  dump();
 
 #ifdef DEBUG_SLICE
   errs() << " ============ END: slicing '" << fun.getName() << "'\n";

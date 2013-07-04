@@ -12,6 +12,7 @@
 
 #include "FunctionStaticSlicer.h"
 #include "Callgraph.h"
+#include "Matcher.h"
 #include "PointsTo.h"
 #include "LLVM.h"
 #include "LLVMSupport.h"
@@ -59,6 +60,7 @@ namespace llvm { namespace slicing {
       const ptr::PointsToSets & ps;
       const callgraph::Callgraph & cg;
       const mods::Modifies & mod;
+      Matcher matcher;
 
   };
 

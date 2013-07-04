@@ -399,6 +399,20 @@ void Matcher::processSubprograms(DICompileUnit &DICU)
   }
 }
 
+MDNode *Matcher::getFunctionMD(const Function *F) {
+  // inefficient, only for infrequent query
+  // simply look all subprograms
+  if (!processed) // must process the module to build up the debug information
+    return NULL;
+  for (DebugInfoFinder::iterator i = Finder.subprogram_begin(), e = Finder.subprogram_end();
+      i != e; ++i) {
+    DISubprogram S(*i);
+    if (S.getFunction() == F)
+      return *i;
+  }
+  return NULL;
+}
+
 void Matcher::dumpSPs()
 {
   sp_iterator I, E;

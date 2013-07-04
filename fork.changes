@@ -1,6 +1,6 @@
 This is forked repository from https://github.com/jirislaby/LLVMSlicer.
 The changes are:
-  * Port to LLVM make build system
+  * Port to LLVM make build system and LLVM 3.0
   * The input of the slicer can now accept <filename, line number, variable> tuple as 
     the slicing criterion. It will output the final slice.
     Example:
