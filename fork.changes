@@ -1,4 +1,8 @@
 This is forked repository from https://github.com/jirislaby/LLVMSlicer.
 The changes are:
   * Port to LLVM make build system
+  * The input of the slicer can now accept <filename, line number, variable> tuple as 
+    the slicing criterion. It will output the final slice.
+    Example:
+    opt -load Debug+Asserts/lib/LLVMSlicer.so -criterion-file="b.c" -criterion-line=13 -criterion-variable="sum" -slice-inter b.ll
   * TODO: add forward slicing part, provide more options
