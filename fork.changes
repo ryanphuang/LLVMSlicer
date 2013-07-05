@@ -6,4 +6,5 @@ The changes are:
     Example:
     opt -load Debug+Asserts/lib/LLVMSlicer.so -criterion-file="b.c" -criterion-line=13 -criterion-variable="sum" -slice-inter b.ll
     opt -load Debug+Asserts/lib/LLVMSlicer.so -criterion-file="d.c" -criterion-line=11 -criterion-variable="product" -forward-slice -slice-inter -output-line d.ll
-  * TODO: add forward slicing part, provide more options
+  * add forward slicing 
+  * provide more options
