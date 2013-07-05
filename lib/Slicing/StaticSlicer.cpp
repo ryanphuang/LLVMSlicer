@@ -28,6 +28,10 @@ static cl::opt<bool>
 OutputLine("output-line",
            cl::desc("Instead of output the slice as instructions, output the line numbers."));
 
+static cl::opt<bool>
+ApplyForward("forward-slice",
+           cl::desc("Apply forward-slice (default is backward-slice)."));
+
 namespace llvm { namespace slicing { namespace detail {
 
   void fillParamsToArgs(CallInst const* const C,
@@ -101,10 +105,11 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
       return;
     }
     errs() << "Matching function: " << F->getName() << "\n";
-    FunctionStaticSlicer *FSS = new FunctionStaticSlicer(*F, mp, ps, mod);
+    FunctionStaticSlicer *FSS = new FunctionStaticSlicer(*F, mp, ps, mod, ApplyForward);
     Instruction *inst;
     inst_iterator ii = inst_begin(F);
     bool found = false;
+    errs() << "Matching instruction: \n";
     while ((inst = matcher.matchInstruction(ii, F, scope)) != NULL) {
       const Value *LHS = NULL;
       if (const LoadInst *LI = dyn_cast<LoadInst>(inst)) {
@@ -113,7 +118,6 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
         LHS = SI->getPointerOperand();
       }
       if (LHS && LHS->hasName() && LHS->getName().equals_lower(SlicingVariable)) {
-        errs() << "Matching instruction: \n";
         inst->dump();
         FSS->addInitialCriterion(inst, LHS);
         found = true;
@@ -139,7 +143,7 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
     si = slicers.find(F);
     if (si == slicers.end()) {
       Function *f = const_cast<Function *>(F);
-      FunctionStaticSlicer *FSS = new FunctionStaticSlicer(*f, mp, ps, mod);
+      FunctionStaticSlicer *FSS = new FunctionStaticSlicer(*f, mp, ps, mod, ApplyForward);
       slicers.insert(Slicers::value_type(F, FSS));
       return FSS;
     }

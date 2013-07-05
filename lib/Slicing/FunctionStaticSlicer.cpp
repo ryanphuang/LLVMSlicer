@@ -43,6 +43,11 @@ using namespace llvm;
 using namespace llvm::slicing;
 
 // #define DEBUG_SLICE
+// #define DEBUG_BC
+// #define DEBUG_SC
+// #define DEBUG_RC
+// #define DEBUG_INSTINFO
+// #define DEBUG_DUMP
 
 InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
     const mods::Modifies &MOD) : ins(i), sliced(true) {
@@ -82,11 +87,22 @@ InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
           addDEF(*I);
       }
 
-      if (!l->getType()->isIntegerTy())
-        addREF(l);
+      if (!l->getType()->isIntegerTy()) {
+#ifdef DEBUG_INSTINFO
+        errs() << " store inst add LHS " << l->getName() << " to reference ";
+        l->getType()->dump();
+        errs() << "\n";
+#endif
+//TODO: make the reference set strict for now
+//        addREF(l);
+      }
       const Value *r = elimConstExpr(SI->getValueOperand());
-      if (!hasExtraReference(r) && !isConstantValue(r))
-        addREF(r);
+      if (!hasExtraReference(r) && !isConstantValue(r)) {
+//         addREF(r);
+#ifdef DEBUG_INSTINFO
+        errs() << " store inst add RHS " << r->getName() << " to reference\n";
+#endif
+      }
     }
   } else if (const GetElementPtrInst *gep =
       dyn_cast<const GetElementPtrInst>(i)) {
@@ -257,77 +273,148 @@ bool FunctionStaticSlicer::sameValues(const Value *val1, const Value *val2)
 }
 
 /*
- * RC(i)=RC(i) \cup
- *   {v| v \in RC(j), v \notin DEF(i)} \cup
- *   {v| v \in REF(i), DEF(i) \cap RC(j) \neq \emptyset}
+ * Backward:
+ *
+ * * RC(i)=RC(i) \cup
+ * *   {v| v \in RC(j), v \notin DEF(i)} \cup
+ * *   {v| v \in REF(i), DEF(i) \cap RC(j) \neq \emptyset}
+ *
+ * Forward:
+ *
+ * * RC(j)=RC(j) \cup
+ * *   {v| v \in RC(i), v \notin DEF(j)} \cup
+ * *   {v| v \in DEF(j), REF(j) \cap RC(i) \neq \emptyset}
  */
 bool FunctionStaticSlicer::computeRCi(InsInfo *insInfoi, InsInfo *insInfoj) {
+  /*
+  if (isa<IntrinsicInst>(insInfoi->getIns()) || isa<IntrinsicInst>(insInfoj->getIns())) {
+    errs() << "skip intrinsic inst\n";
+    return false;
+  }
+  */
+
+#ifdef DEBUG_RC
+  errs() << " ---" << __func__ << "--- between '";
+  insInfoi->getIns()->print(errs());
+  errs() << "' and '";
+  insInfoj->getIns()->print(errs());
+  errs() << "'\n";
+#endif
+
+
   bool changed = false;
 
-  /* {v| v \in RC(j), v \notin DEF(i)} */
-  for (ValSet::const_iterator I = insInfoj->RC_begin(),
-      E = insInfoj->RC_end(); I != E; I++) {
+  InsInfo *ii, *ij;
+  if (!forward) { // backward 
+    ii = insInfoi;
+    ij = insInfoj;
+  }
+  else { // forward 
+    ii = insInfoj;
+    ij = insInfoi;
+  }
+
+  ValSet::const_iterator I, E;
+
+  /* Backward: {v| v \in RC(j), v \notin DEF(i)} */
+  /* Forward:  {v| v \in RC(i), v \notin DEF(j)} */
+  for (I = ij->RC_begin(), E = ij->RC_end(); I != E; I++) {
     const Value *RCj = *I;
+#ifdef DEBUG_RC
+    errs() << "\tRC '";
+    if (RCj->hasName())
+      errs() << "  " << RCj->getName();
+    else
+      RCj->dump();
+      errs() << "': ";
+#endif
     bool in_DEF = false;
-    for (ValSet::const_iterator II = insInfoi->DEF_begin(),
-        EE = insInfoi->DEF_end(); II != EE; II++)
+    for (ValSet::const_iterator II = ii->DEF_begin(),
+        EE = ii->DEF_end(); II != EE; II++)
       if (sameValues(*II, RCj)) {
         in_DEF = true;
         break;
       }
-    if (!in_DEF)
-      if (insInfoi->addRC(RCj))
+    if (!in_DEF) {
+#ifdef DEBUG_RC
+      errs() << "Kept\n";
+#endif
+      if (ii->addRC(RCj)) {
         changed = true;
+      }
+    }
+    else {
+#ifdef DEBUG_RC
+      errs() << "Remove by";
+      ii->getIns()->print(errs());
+      errs() << "\n";
+#endif
+    }
   }
-  /* DEF(i) \cap RC(j) \neq \emptyset */
+
+  /* Backward: DEF(i) \cap RC(j) \neq \emptyset */
+  /* Forward: REF(j) \cap RC(i) \neq \emptyset */
   bool isect_nonempty = false;
-  for (ValSet::const_iterator I = insInfoi->DEF_begin(),
-      E = insInfoi->DEF_end(); I != E && !isect_nonempty; I++) {
-    const Value *DEFi = *I;
-    for (ValSet::const_iterator II = insInfoj->RC_begin(),
-        EE = insInfoj->RC_end(); II != EE; II++) {
-      if (sameValues(DEFi, *II)) {
+  if (!forward) {
+    I = ii->DEF_begin();
+    E = ii->DEF_end();
+  }
+  else {
+    I = ii->REF_begin();
+    E = ii->REF_end();
+  }
+  for (; I != E && !isect_nonempty; I++) {
+    const Value *VALi = *I; // VAL could be DEF or REF
+    for (ValSet::const_iterator II = ij->RC_begin(),
+        EE = ij->RC_end(); II != EE; II++) {
+      if (sameValues(VALi, *II)) {
         isect_nonempty = true;
         break;
       }
     }
   }
 
-  /* {v| v \in REF(i), ...} */
-  if (isect_nonempty)
-    for (ValSet::const_iterator I = insInfoi->REF_begin(),
-        E = insInfoi->REF_end(); I != E; I++)
-      if (insInfoi->addRC(*I))
+  /* Backward: {v| v \in REF(i), ...} */
+  /* Forward:  {v| v \in DEF(j), ...} */
+  if (!forward) {
+    I = ii->REF_begin();
+    E = ii->REF_end();
+  }
+  else {
+    I = ii->DEF_begin();
+    E = ii->DEF_end();
+  }
+  if (isect_nonempty) {
+    for (; I != E; I++)
+      if (ii->addRC(*I)) {
         changed = true;
 #ifdef DEBUG_RC
-  errs() << "  " << __func__ << "2 END";
-  if (changed)
-    errs() << " ----------CHANGED";
-  errs() << '\n';
+        errs() << "\tAdd RC: " <<  (*I)->getName() << "\n";
 #endif
+      }
+  }
   return changed;
 }
 
+/*
+ * Backward, Forward: get successors
+ * 
+ */
 bool FunctionStaticSlicer::computeRCi(InsInfo *insInfoi) {
   const Instruction *i = insInfoi->getIns();
   bool changed = false;
-#ifdef DEBUG_RC
-  errs() << "  " << __func__ << ": " << i->getOpcodeName();
-  if (i->hasName())
-    errs() << " (" << i->getName() << ")";
-  errs() << '\n';
-  errs() << "    DUMP: ";
-  i->print(errs());
-  errs() << '\n';
-#endif
   SuccList succList = getSuccList(i);
-  for (SuccList::const_iterator I = succList.begin(), E = succList.end();
-      I != E; I++)
+  SuccList::const_iterator I = succList.begin(), E = succList.end();
+  for (;I != E; I++)
     changed |= computeRCi(insInfoi, getInsInfo(*I));
-
   return changed;
 }
 
+/*
+ * Backward: Bottom-up
+ * Forward:  Top-down
+ *
+ */
 void FunctionStaticSlicer::computeRC() {
   bool changed;
 #ifdef DEBUG_RC
@@ -336,53 +423,94 @@ void FunctionStaticSlicer::computeRC() {
   do {
     changed = false;
 #ifdef DEBUG_RC
-    errs() << __func__ << ": ============== Iteration " << it++ << '\n';
+    errs() << "======BEG RC Iteration " << it << "======\n";
 #endif
-    typedef std::reverse_iterator<Function::iterator> revFun;
-    for (revFun I = revFun(fun.end()), E = revFun(fun.begin()); I != E; I++) {
-      typedef std::reverse_iterator<BasicBlock::iterator> rev;
-      InsInfo *past = NULL;
-      for (rev II = rev(I->end()), EE = rev(I->begin()); II != EE; ++II) {
-        InsInfo *insInfo = getInsInfo(&*II);
-        if (!past)
-          changed |= computeRCi(insInfo);
-        else
-          changed |= computeRCi(insInfo, past);
-        past = insInfo;
+    if (!forward) { // backward slicing, work on in bottom-up fashion
+      typedef std::reverse_iterator<Function::iterator> revFun;
+      for (revFun I = revFun(fun.end()), E = revFun(fun.begin()); I != E; I++) {
+        typedef std::reverse_iterator<BasicBlock::iterator> rev;
+        InsInfo *past = NULL;
+        for (rev II = rev(I->end()), EE = rev(I->begin()); II != EE; ++II) {
+          InsInfo *insInfo = getInsInfo(&*II);
+          if (!past)
+            changed |= computeRCi(insInfo);
+          else
+            changed |= computeRCi(insInfo, past);
+          past = insInfo;
+        }
+      }
+    } 
+    else { // forward slicing, work on in top-down fashion
+      Function::iterator FI, FE;
+      for (FI = fun.begin(), FE = fun.end(); FI != FE; ++FI) {
+        BasicBlock::iterator BI = FI->begin(), BE = FI->end();
+        if (BI == BE) // empty block
+          continue;
+        InsInfo *past = getInsInfo(&*BI);
+        BI++;
+        for (; BI != BE; ++BI) {
+          InsInfo *insInfo = getInsInfo(&*BI);
+          changed |= computeRCi(past, insInfo);
+          past = insInfo;
+        }
+        changed |= computeRCi(past);
       }
     }
+#ifdef DEBUG_RC
+    errs() << "======END RC Iteration " << it << "======\n";
+    it++;
+#endif
   } while (changed);
 }
 
 /*
- * SC(i)={i| DEF(i) \cap RC(j) \neq \emptyset}
+ * Backward:
+ *
+ * * SC(i)={i| DEF(i) \cap RC(j) \neq \emptyset}
+ *
+ * Forward:
+ * * SC(j)={j| REF(j) \cap RC(i) \neq \emptyset}
+ *
  */
 void FunctionStaticSlicer::computeSCi(const Instruction *i, const Instruction *j) {
-  InsInfo *insInfoi = getInsInfo(i), *insInfoj = getInsInfo(j);
+
+  InsInfo *insInfoi, *insInfoj;
+  ValSet::const_iterator I, E;
+  if (!forward) { // backward
+    insInfoi = getInsInfo(i);
+    insInfoj = getInsInfo(j);
+    I = insInfoi->DEF_begin();
+    E = insInfoi->DEF_end();
+  }
+  else {
+    insInfoj = getInsInfo(i);
+    insInfoi = getInsInfo(j);
+    I = insInfoi->REF_begin();
+    E = insInfoi->REF_end();
+  }
 
   bool isect_nonempty = false;
-  for (ValSet::const_iterator I = insInfoi->DEF_begin(),
-      E = insInfoi->DEF_end(); I != E && !isect_nonempty; I++) {
-    const Value *DEFi = *I;
+  for (; I != E && !isect_nonempty; I++) {
+    const Value *VALi = *I; //VALi could be DEF or REF
     for (ValSet::const_iterator II = insInfoj->RC_begin(),
         EE = insInfoj->RC_end(); II != EE; II++) {
-      if (sameValues(DEFi, *II)) {
+      if (sameValues(VALi, *II)) {
+#ifdef DEBUG_SC
+        errs() << "\tRC: " << (*II)->getName() << " is referenced by ";
+        i->print(errs());
+        errs() << "\n";
+#endif
         isect_nonempty = true;
+        insInfoi->deslice();
         break;
       }
     }
   }
-
-  if (isect_nonempty) {
-    insInfoi->deslice();
-#ifdef DEBUG_SLICING
-    errs() << "XXXXXXXXXXXXXY ";
-    i->print(errs());
-    errs() << '\n';
-#endif
-  }
 }
 
+/*
+ * Backward, Forward: iterate every instruction and its successors
+ */
 void FunctionStaticSlicer::computeSC() {
   for (inst_iterator I = inst_begin(fun), E = inst_end(fun); I != E; I++) {
     const Instruction *i = &*I;
@@ -393,30 +521,69 @@ void FunctionStaticSlicer::computeSC() {
   }
 }
 
+/*
+ * 
+ *
+ */
 bool FunctionStaticSlicer::computeBC() {
   bool changed = false;
 #ifdef DEBUG_BC
-  errs() << __func__ << " ============ BEG\n";
+  errs() << " ====== BEG BC Computation ======\n";
 #endif
-  PostDominanceFrontier &PDF = MP->getAnalysis<PostDominanceFrontier>(fun);
-  for (inst_iterator I = inst_begin(fun), E = inst_end(fun); I != E; I++) {
-    Instruction *i = &*I;
-    const InsInfo *ii = getInsInfo(i);
-    if (ii->isSliced())
-      continue;
-    BasicBlock *BB = i->getParent();
+  if (!forward) {
+    PostDominanceFrontier &PDF = MP->getAnalysis<PostDominanceFrontier>(fun);
+    for (inst_iterator I = inst_begin(fun), E = inst_end(fun); I != E; I++) {
+      Instruction *i = &*I;
+      const InsInfo *ii = getInsInfo(i);
+      if (ii->isSliced())
+        continue;
+      BasicBlock *BB = i->getParent();
 #ifdef DEBUG_BC
-    errs() << "  ";
-    i->print(errs());
-    errs() << " -> bb=" << BB->getName() << '\n';
+      errs() << "  ";
+      i->print(errs());
+      errs() << " -> bb=" << BB->getName() << '\n';
 #endif
-    PostDominanceFrontier::const_iterator frontier = PDF.find(BB);
-    if (frontier == PDF.end())
-      continue;
-    changed |= updateRCSC(frontier->second.begin(), frontier->second.end());
+      PostDominanceFrontier::const_iterator frontier = PDF.find(BB);
+      if (frontier == PDF.end())
+        continue;
+      changed |= updateRCSC(frontier->second.begin(), frontier->second.end());
+    }
+  }
+  else {
+    for (inst_iterator I = inst_begin(fun), E = inst_end(fun); I != E; I++) {
+      Instruction *i = &*I;
+      if (!isa<BranchInst>(i))
+        continue;
+      BranchInst * bi = dyn_cast<BranchInst>(i);
+      if (bi->isUnconditional()) // skip unconditional inst
+        continue;
+      const InsInfo *ii = getInsInfo(i);
+      if (ii->isSliced())
+        continue;
+      unsigned succs = bi->getNumSuccessors(); 
+      for (unsigned si = 0; si < succs; si++) {
+        BasicBlock * BB = bi->getSuccessor(si);
+        BasicBlock * Pred = BB->getUniquePredecessor();
+        if (Pred == NULL)
+          continue;
+        for (BasicBlock::iterator BI = BB->begin(), BE = BB->end(); BI != BE; BI++) {
+          InsInfo *bii = getInsInfo(&*BI);
+          bii->deslice();
+          for (ValSet::const_iterator VI = bii->DEF_begin(), VE = bii->DEF_end();
+            VI != VE; VI++) {
+            if (bii->addRC(*VI)) {
+              changed = true;
+#ifdef DEBUG_RC
+              errs() << "  added " << (*VI)->getName() << "\n";
+#endif
+            }
+          }
+        }
+      }
+    }
   }
 #ifdef DEBUG_BC
-  errs() << __func__ << " ============ END\n";
+  errs() << " ====== END BC Computation ======\n";
 #endif
   return changed;
 }
@@ -467,7 +634,6 @@ static bool canSlice(const Instruction &i) {
   return true;
 }
 
-
 // a simple function 'prototype' printer
 void printFuncProtoType(Function *F)
 {
@@ -485,6 +651,10 @@ void printFuncProtoType(Function *F)
 }
 
 void FunctionStaticSlicer::dump(Matcher &matcher, bool outputline) {
+  if (forward)
+    errs() << "forward ";
+  else
+    errs() << "backward ";
   errs() << "slice in '";
   printFuncProtoType(&fun);
   /*

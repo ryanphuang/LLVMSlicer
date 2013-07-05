@@ -26,7 +26,19 @@ public:
 
   const Instruction *getIns() const { return ins; }
 
-  bool addRC(const llvm::Value *var) { return RC.insert(var); }
+  bool addRC(const llvm::Value *var) 
+  {
+#ifdef DEBUG_RC
+    errs() << "\tadding RC to '";
+    ins->print(errs());
+    errs() << "':";
+    if (var->hasName())
+      errs() << "  " << var->getName() << "\n";
+    else
+      var->dump();
+#endif
+    return RC.insert(var); 
+  }
   bool addDEF(const llvm::Value *var) { return DEF.insert(var); }
   bool addREF(const llvm::Value *var) { return REF.insert(var); }
   void deslice() { sliced = false; }
@@ -51,9 +63,8 @@ public:
   typedef std::map<const llvm::Instruction *, InsInfo *> InsInfoMap;
 
   FunctionStaticSlicer(llvm::Function &F, llvm::ModulePass *MP,
-                       const llvm::ptr::PointsToSets &PT,
-		       const llvm::mods::Modifies &mods) :
-	  fun(F), MP(MP) {
+    const llvm::ptr::PointsToSets &PT, const llvm::mods::Modifies &mods, bool forward = false) :
+	  fun(F), MP(MP), forward(forward) {
     for (llvm::inst_iterator I = llvm::inst_begin(F), E = llvm::inst_end(F);
 	 I != E; ++I)
       insInfoMap.insert(InsInfoMap::value_type(&*I, new InsInfo(&*I, PT, mods)));
@@ -116,6 +127,7 @@ private:
   llvm::ModulePass *MP;
   InsInfoMap insInfoMap;
   llvm::SmallSetVector<const llvm::CallInst *, 10> skipAssert;
+  bool forward;
 
   static bool sameValues(const Value *val1, const Value *val2);
   void crawlBasicBlock(const llvm::BasicBlock *bb);
