@@ -230,6 +230,11 @@ namespace llvm {
       return C->getType()->getTypeID() == llvm::Type::VoidTyID;
     }
 
+    bool isVoidFunction(llvm::Function const * const F)
+    {
+      return F->getReturnType()->isVoidTy();
+    }
+
     llvm::Instruction const* getSuccInBlock(llvm::Instruction const* const I)
     {
         llvm::BasicBlock::const_iterator it(I);

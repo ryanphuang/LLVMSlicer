@@ -49,13 +49,21 @@ using namespace llvm::slicing;
 // #define DEBUG_INSTINFO
 // #define DEBUG_DUMP
 
+#ifdef DEBUG_RC
+static void printVal(const Value *val) {
+  if (val->hasName())
+    errs() << val->getName();
+  else
+    val->print(errs());
+}
+#endif
+
 InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
     const mods::Modifies &MOD) : ins(i), sliced(true) {
   typedef ptr::PointsToSets::PointsToSet PTSet;
 
   if (const LoadInst *LI = dyn_cast<const LoadInst>(i)) {
     addDEF(i);
-
     const Value *op = elimConstExpr(LI->getPointerOperand());
     if (isa<ConstantPointerNull>(op)) {
       errs() << "ERROR in analysed code -- reading from address 0 at " <<
@@ -94,11 +102,11 @@ InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
         errs() << "\n";
 #endif
 //TODO: make the reference set strict for now
-//        addREF(l);
+        addREF(l);
       }
       const Value *r = elimConstExpr(SI->getValueOperand());
       if (!hasExtraReference(r) && !isConstantValue(r)) {
-//         addREF(r);
+         addREF(r);
 #ifdef DEBUG_INSTINFO
         errs() << " store inst add RHS " << r->getName() << " to reference\n";
 #endif
@@ -116,6 +124,8 @@ InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
         addREF(op);
     }
   } else if (CallInst const* const C = dyn_cast<const CallInst>(i)) {
+    if (isa<IntrinsicInst>(C)) // skip intrinsic instruction
+      return;
     const Value *cv = C->getCalledValue();
 
     if (isInlineAssembly(C)) {
@@ -147,19 +157,47 @@ InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
       CalledVec CV;
       getCalledFunctions(C, PS, std::back_inserter(CV));
       const Value *callie = C->getCalledValue();
+#ifdef DEBUG_INSTINFO
+      errs() << "CallInst ";
+      C->dump();
+#endif
 
-      if (!isa<Function>(callie))
+      if (!isa<Function>(callie)) {
+#ifdef DEBUG_INSTINFO
+        errs() << "\tRef1: ";
+        callie->dump();
+#endif
         addREF(callie);
+      }
 
       for (CalledVec::const_iterator f = CV.begin(); f != CV.end(); ++f) {
         mods::Modifies::mapped_type const& M = getModSet(*f, MOD);
         for (mods::Modifies::mapped_type::const_iterator v = M.begin();
-            v != M.end(); ++v)
+            v != M.end(); ++v) {
+#ifdef DEBUG_INSTINFO
+          errs() << "\tDef1: ";
+          (*v)->dump();
+#endif
           addDEF(*v);
+        }
       }
 
-      if (!callToVoidFunction(C))
+      unsigned argn = C->getNumArgOperands();
+      for (unsigned arg = 0; arg < argn; arg++) {
+#ifdef DEBUG_INSTINFO
+        errs() << "\tRef2: ";
+        C->getArgOperand(arg)->dump();
+#endif
+        addREF(C->getArgOperand(arg));
+      }
+
+      if (!callToVoidFunction(C)) {
+#ifdef DEBUG_INSTINFO
+        errs() << "\tDef2: ";
+        C->dump();
+#endif
         addDEF(C);
+      }
     }
   } else if (isa<const ReturnInst>(i)) {
   } else if (const BinaryOperator *BO = dyn_cast<const BinaryOperator>(i)) {
@@ -321,12 +359,10 @@ bool FunctionStaticSlicer::computeRCi(InsInfo *insInfoi, InsInfo *insInfoj) {
   for (I = ij->RC_begin(), E = ij->RC_end(); I != E; I++) {
     const Value *RCj = *I;
 #ifdef DEBUG_RC
-    errs() << "\tRC '";
-    if (RCj->hasName())
-      errs() << "  " << RCj->getName();
-    else
-      RCj->dump();
-      errs() << "': ";
+    errs() << "\tRC";
+    RCj->print(errs());
+    // printVal(RCj);
+    errs() << ": ";
 #endif
     bool in_DEF = false;
     for (ValSet::const_iterator II = ii->DEF_begin(),
@@ -345,9 +381,7 @@ bool FunctionStaticSlicer::computeRCi(InsInfo *insInfoi, InsInfo *insInfoj) {
     }
     else {
 #ifdef DEBUG_RC
-      errs() << "Remove by";
-      ii->getIns()->print(errs());
-      errs() << "\n";
+      errs() << "Removed\n";
 #endif
     }
   }
@@ -389,7 +423,10 @@ bool FunctionStaticSlicer::computeRCi(InsInfo *insInfoi, InsInfo *insInfoj) {
       if (ii->addRC(*I)) {
         changed = true;
 #ifdef DEBUG_RC
-        errs() << "\tAdd RC: " <<  (*I)->getName() << "\n";
+        errs() << "\tRC"; 
+        // printVal(*I);
+        (*I)->print(errs());
+        errs() << ": Added \n";
 #endif
       }
   }
@@ -496,7 +533,9 @@ void FunctionStaticSlicer::computeSCi(const Instruction *i, const Instruction *j
         EE = insInfoj->RC_end(); II != EE; II++) {
       if (sameValues(VALi, *II)) {
 #ifdef DEBUG_SC
-        errs() << "\tRC: " << (*II)->getName() << " is referenced by ";
+        errs() << "\tRC: ";
+        printVal(*II);
+        errs() << " is referenced by ";
         i->print(errs());
         errs() << "\n";
 #endif
@@ -574,7 +613,9 @@ bool FunctionStaticSlicer::computeBC() {
             if (bii->addRC(*VI)) {
               changed = true;
 #ifdef DEBUG_RC
-              errs() << "  added " << (*VI)->getName() << "\n";
+              errs() << "  added ";
+              printVal(*VI); 
+              errs() << "\n";
 #endif
             }
           }
@@ -853,6 +894,7 @@ void FunctionStaticSlicer::removeUndefs(ModulePass *MP, Function &F)
   removeUndefCalls(MP, F);
 }
 
+#if 0
 static bool handleAssert(Function &F, FunctionStaticSlicer &ss,
     const CallInst *CI) {
 
@@ -894,6 +936,7 @@ count:
       F.getParent()->getGlobalVariable("__ai_init_functions", true));
   return true;
 }
+#endif
 
 bool llvm::slicing::findInitialCriterion(Function &F,
     FunctionStaticSlicer &ss,

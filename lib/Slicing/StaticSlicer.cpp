@@ -49,6 +49,22 @@ namespace llvm { namespace slicing { namespace detail {
     }
   }
 
+  void mapArgsToParams(CallInst const* const C,
+      Function const* const F,
+      ParamsToArgs& toArgs)
+  {
+    Function::const_arg_iterator p = F->arg_begin();
+    std::size_t a = 0;
+    for ( ; a < C->getNumArgOperands(); ++a, ++p)
+    {
+      Value const* const P = &*p;
+      Value const* const A = C->getArgOperand(a);
+      if (!isConstantValue(A))
+        toArgs[A] = P;
+    }
+
+  }
+
 }}}
 
 namespace llvm { namespace slicing {
@@ -111,16 +127,29 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
     bool found = false;
     errs() << "Matching instruction: \n";
     while ((inst = matcher.matchInstruction(ii, F, scope)) != NULL) {
-      const Value *LHS = NULL;
-      if (const LoadInst *LI = dyn_cast<LoadInst>(inst)) {
-        LHS = LI->getPointerOperand();
-      } else if (const StoreInst * SI = dyn_cast<StoreInst>(inst)) {
-        LHS = SI->getPointerOperand();
-      }
-      if (LHS && LHS->hasName() && LHS->getName().equals_lower(SlicingVariable)) {
-        inst->dump();
-        FSS->addInitialCriterion(inst, LHS);
-        found = true;
+      InsInfo * insInfo = new InsInfo(inst, PS, mod);
+      if (ApplyForward) {
+        ValSet::const_iterator ci, ce;
+        for (ci = insInfo->DEF_begin(), ce = insInfo->DEF_end(); ci != ce; ci++) {
+          const Value * val = *ci;
+          if (val->hasName() && val->getName().equals_lower(SlicingVariable)) {
+            inst->dump();
+            FSS->addInitialCriterion(inst, val);
+            found = true;
+          }
+        }
+      } else {
+        const Value *LHS = NULL;
+        if (const LoadInst *LI = dyn_cast<LoadInst>(inst)) {
+          LHS = LI->getPointerOperand();
+        } else if (const StoreInst * SI = dyn_cast<StoreInst>(inst)) {
+          LHS = SI->getPointerOperand();
+        }
+        if (LHS && LHS->hasName() && LHS->getName().equals_lower(SlicingVariable)) {
+          inst->dump();
+          FSS->addInitialCriterion(inst, LHS);
+          found = true;
+        }
       }
     }
     if (!found) {
@@ -163,8 +192,14 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
 
       WorkSet tmp;
       for (WorkSet::iterator f = Q.begin(); f != Q.end(); ++f) {
-        emitToCalls(*f, std::inserter(tmp, tmp.end()));
-        emitToExits(*f, std::inserter(tmp, tmp.end()));
+        if (!ApplyForward) {
+          emitToCalls(*f, std::inserter(tmp, tmp.end()));
+          emitToExits(*f, std::inserter(tmp, tmp.end()));
+        }
+        else {
+          emitToForwardExits(*f, std::inserter(tmp, tmp.end()));
+          emitToForwardCalls(*f, std::inserter(tmp, tmp.end()));
+        }
       }
       std::swap(tmp,Q);
     }

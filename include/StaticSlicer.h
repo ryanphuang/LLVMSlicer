@@ -17,6 +17,8 @@
 #include "LLVM.h"
 #include "LLVMSupport.h"
 
+// #define DEBUG_EMIT
+
 namespace llvm { namespace slicing {
 
   class StaticSlicer {
@@ -51,6 +53,12 @@ namespace llvm { namespace slicing {
       template<typename OutIterator>
         void emitToExits(llvm::Function const* const f, OutIterator out);
 
+      template<typename OutIterator>
+        void emitToForwardExits(llvm::Function const* const f, OutIterator out);
+
+      template<typename OutIterator>
+        void emitToForwardCalls(llvm::Function const* const f, OutIterator out);
+
       ModulePass *mp;
       Module &module;
       Slicers slicers;
@@ -71,6 +79,10 @@ namespace llvm { namespace slicing { namespace detail {
 
   typedef std::map<llvm::Value const*,llvm::Value const*>
     ParamsToArgs;
+
+  void mapArgsToParams(CallInst const* const C,
+      Function const* const F,
+      ParamsToArgs& toArgs);
 
   void fillParamsToArgs(llvm::CallInst const* const C,
       llvm::Function const* const F,
@@ -123,10 +135,62 @@ namespace llvm { namespace slicing { namespace detail {
 }}}
 
 namespace llvm { namespace slicing {
+  template<typename OutIterator>
+    void StaticSlicer::emitToForwardCalls(llvm::Function const* const f,
+        OutIterator out) {
+#ifdef DEBUG_EMIT
+      errs() << __func__ << " for " << f->getName() << "\n";
+#endif
+      if (isVoidFunction(f)) {
+#ifdef DEBUG_EMIT
+        errs() << " skip void function\n";
+#endif
+        return;
+      }
+      typedef std::vector<const llvm::ReturnInst *> ExitsVec;
+      ExitsVec E;
+      getFunctionExits(f, std::back_inserter(E));
+      FunctionStaticSlicer * fss = getFSS(f);
+      bool returnAffected = false;
+      for (ExitsVec::const_iterator ei = E.begin(); ei != E.end(); ++ei) {
+        if (!fss->isSliced(*ei)) {
+          returnAffected = true;
+          break;
+        }
+      }
+      // if no return statement is affected, skip UP()
+      if (!returnAffected) 
+        return;
+      FuncsToCalls::const_iterator c, e;
+      llvm::tie(c,e) = funcsToCalls.equal_range(f);
+      for ( ; c != e; ++c) {
+        const llvm::CallInst *CI = c->second;
+        // if a call is void call
+        if (callToVoidFunction(CI)) {
+#ifdef DEBUG_EMIT
+          errs() << " skip void call";
+          CI->print(errs());
+          errs() << "\n";
+          continue;
+#endif
+        }
+        const llvm::Function *g = CI->getParent()->getParent();
+#ifdef DEBUG_EMIT
+        errs() << " caller " << g->getName() << "\n";
+#endif
+        FunctionStaticSlicer *FSS = getFSS(g);
+        if (FSS->addCriterion(CI, FSS->DEF_begin(CI), FSS->DEF_end(CI))) {
+          *out++ = g;
+        }
+      }
+    }
 
   template<typename OutIterator>
     void StaticSlicer::emitToCalls(llvm::Function const* const f,
         OutIterator out) {
+#ifdef DEBUG_EMIT
+      errs() << __func__ << " for " << f->getName() << "\n";
+#endif
       FunctionStaticSlicer * fss = getFSS(f);
       const ValSet::const_iterator relBgn =
         fss->relevant_begin(getFunctionEntry(f));
@@ -137,6 +201,9 @@ namespace llvm { namespace slicing {
       for ( ; c != e; ++c) {
         const llvm::CallInst *CI = c->second;
         const llvm::Function *g = CI->getParent()->getParent();
+#ifdef DEBUG_EMIT
+        errs() << " caller " << g->getName() << "\n";
+#endif
         FunctionStaticSlicer *FSS = getFSS(g);
         std::set<const llvm::Value *> R;
         detail::getRelevantVarsAtCall(c->second, f, relBgn, relEnd,
@@ -150,8 +217,76 @@ namespace llvm { namespace slicing {
     }
 
   template<typename OutIterator>
+    void StaticSlicer::emitToForwardExits(llvm::Function const* const f,
+        OutIterator out) {
+#ifdef DEBUG_EMIT
+      errs() << __func__ << " for " << f->getName() << "\n";
+#endif
+      typedef std::vector<const llvm::CallInst *> CallsVec;
+      CallsVec C;
+      getFunctionCalls(f, std::back_inserter(C));
+      FunctionStaticSlicer * fss = getFSS(f);
+      for (CallsVec::const_iterator c = C.begin(); c != C.end(); ++c) {
+        const llvm::CallInst * CI = *c;
+        if (isa<IntrinsicInst>(CI)) {
+          continue;
+        }
+        // if call inst REF does not intersect with any RC, skip the DOWN()
+        if (fss->isSliced(CI)) {
+#ifdef DEBUG_EMIT
+          errs() << "skip CallInst that's not in slice:";
+          CI->dump();
+#endif
+          continue;
+        }
+        CallsToFuncs::const_iterator g, e;
+        llvm::tie(g, e) = callsToFuncs.equal_range(*c);
+        for ( ; g != e; ++g) {
+          const Function *callee = g->second;
+          FunctionStaticSlicer * FSS = getFSS(callee);
+#ifdef DEBUG_EMIT
+          errs() << " callee " << callee->getName() << "\n";
+#endif
+          Function::const_arg_iterator cai = callee->arg_begin();
+          unsigned args = 0;
+          for (; args < CI->getNumArgOperands() && cai != callee->arg_end(); args++, cai++) {
+            Value const * param = &*cai;
+            Value const * argument = CI->getArgOperand(args);
+            if (isConstantValue(argument)) { // skip constant argument
+#ifdef DEBUG_EMIT
+              errs() << " argument " << argument->getName();
+              argument->print(errs());
+              errs() << " is constant\n";
+#endif
+              continue;
+            }
+            ValSet::const_iterator  rci, rce;
+            // add the argument that is influenced and propagate 
+            std::set<const llvm::Value *> R;
+            for (rci = fss->relevant_begin(CI), rce = fss->relevant_end(CI); rci != rce; rci++) {
+              if (argument == *rci) {
+#ifdef DEBUG_EMIT
+                errs() << " argument ";
+                argument->print(errs());
+                errs() << " is in relevant set\n";
+#endif
+                R.insert(param);
+              }
+            }
+            if (FSS->addCriterion(getFunctionEntry(callee), R.begin(), R.end())) {
+              *out++ = callee;
+            }
+          }
+        }
+      }
+    }
+
+  template<typename OutIterator>
     void StaticSlicer::emitToExits(llvm::Function const* const f,
         OutIterator out) {
+#ifdef DEBUG_EMIT
+      errs() << __func__ << " for " << f->getName() << "\n";
+#endif
       typedef std::vector<const llvm::CallInst *> CallsVec;
       CallsVec C;
       getFunctionCalls(f, std::back_inserter(C));
@@ -165,16 +300,23 @@ namespace llvm { namespace slicing {
         llvm::tie(g, e) = callsToFuncs.equal_range(*c);
         for ( ; g != e; ++g) {
           typedef std::vector<const llvm::ReturnInst *> ExitsVec;
-          const Function *callie = g->second;
+          const Function *callee = g->second;
+#ifdef DEBUG_EMIT
+          errs() << " callee " << callee->getName() << "\n";
+#endif
           ExitsVec E;
-          getFunctionExits(callie, std::back_inserter(E));
+          getFunctionExits(callee, std::back_inserter(E));
           for (ExitsVec::const_iterator e = E.begin(); e != E.end(); ++e) {
+#ifdef DEBUG_EMIT
+            errs() << "    add return statement: ";
+#endif
+            (*e)->dump();
             std::set<const llvm::Value *> R;
             detail::getRelevantVarsAtExit(*c, *e, relBgn, relEnd,
                 std::inserter(R, R.end()));
-            FunctionStaticSlicer * FSS = getFSS(g->second);
+            FunctionStaticSlicer * FSS = getFSS(callee);
             if (FSS->addCriterion(*e, R.begin(),R .end()))
-              *out++ = g->second;
+              *out++ = callee;
           }
         }
       }

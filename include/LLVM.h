@@ -51,6 +51,7 @@ namespace llvm {
     bool isLocalToFunction(llvm::Value const* const V,
                            llvm::Function const* const F);
     bool callToVoidFunction(llvm::CallInst const* const C);
+    bool isVoidFunction(llvm::Function const * const F);
     llvm::Instruction const* getSuccInBlock(llvm::Instruction const* const);
     const llvm::Value *elimConstExpr(const llvm::Value *V);
 }

@@ -1,10 +1,14 @@
 #include <stdio.h>
-int __ai_state_;
-void compute(int n)
+void compute(int n, int m)
 {
+  m++;
   int i = 1;
   int sum = 0;
-  int product = 1;
+  int product;
+  if (m <= 0)
+    product = 1;
+  else
+    product = m;
   while (i < n) {
     sum = sum + i;
     product = product * i;
@@ -12,13 +16,12 @@ void compute(int n)
   }
   printf("sum = %d\n", sum);
   printf("product = %d\n", product);
-  __ai_state_ = 0;
 }
 
 int main()
 {
-  int n;
-  scanf("%d", &n);
-  compute(n);
+  int n, m;
+  scanf("%d %d", &n, &m);
+  compute(n, m);
   return 0;
 }

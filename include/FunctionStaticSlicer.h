@@ -84,15 +84,34 @@ public:
   ValSet::const_iterator REF_end(const llvm::Instruction *I) const {
     return getInsInfo(I)->REF_end();
   }
+  ValSet::const_iterator DEF_begin(const llvm::Instruction *I) const {
+    return getInsInfo(I)->DEF_begin();
+  }
+  ValSet::const_iterator DEF_end(const llvm::Instruction *I) const {
+    return getInsInfo(I)->DEF_end();
+  }
+
+  bool isSliced(const llvm::Instruction *I) const {
+    return getInsInfo(I)->isSliced();
+  }
 
   template<typename FwdValueIterator>
   bool addCriterion(const llvm::Instruction *ins, FwdValueIterator b,
 		    FwdValueIterator const e, bool desliceIfChanged = false) {
     if (isa<IntrinsicInst>(ins)) {
+#ifdef DEBUG_CRITERION
       errs() << "skip intrinsic inst\n";
+#endif
       return false;
     }
     InsInfo *ii = getInsInfo(ins);
+    if (ii == NULL) {
+#ifdef DEBUG_CRITERION
+      errs() << "No associated insinfo for ";
+      ins->dump();
+#endif
+      return false;
+    }
     bool change = false;
     for (; b != e; ++b)
       if (ii->addRC(*b))
@@ -105,8 +124,19 @@ public:
   void addInitialCriterion(const llvm::Instruction *ins,
 			   const llvm::Value *cond = 0, bool deslice = true) {
     InsInfo *ii = getInsInfo(ins);
-    if (cond)
+    if (cond) {
+// #ifdef DEUBG_RC
+      errs() << "\tAdd initial RC: ";
+      /*
+      if (cond->hasName())
+        errs() << cond->getName() << "\n";
+      else
+        cond->dump();
+      */
+      cond->dump();
+// #endif
       ii->addRC(cond);
+    }
     ii->deslice();
   }
   void calculateStaticSlice();
@@ -146,10 +176,9 @@ private:
   InsInfo *getInsInfo(const llvm::Instruction *i) const {
     InsInfoMap::const_iterator I = insInfoMap.find(i);
     if (I == insInfoMap.end()) {
-      errs() << "Reaching end of ins info map: \n";
-      i->dump();
+      return NULL;
     }
-    assert(I != insInfoMap.end());
+    // assert(I != insInfoMap.end());
     return I->second;
   }
 
