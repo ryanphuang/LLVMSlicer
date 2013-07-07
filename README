@@ -45,6 +45,7 @@ Changes/enhancement made in the branch:
   opt -load Debug+Asserts/lib/LLVMSlicer.so -criterion-file="b.c" -criterion-line=13 -criterion-variable="sum" -slice-inter b.ll
   opt -load Debug+Asserts/lib/LLVMSlicer.so -criterion-file="d.c" -criterion-line=11 -criterion-variable="product" -forward-slice -slice-inter -output-line d.ll
 * add forward slicing 
+* fix the calling context problems
 * provide more options
 * rewrite code
 
