@@ -184,11 +184,14 @@ InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
 
       unsigned argn = C->getNumArgOperands();
       for (unsigned arg = 0; arg < argn; arg++) {
+        Value * argument = C->getArgOperand(arg);
 #ifdef DEBUG_INSTINFO
         errs() << "\tRef2: ";
-        C->getArgOperand(arg)->dump();
+        argument->dump();
 #endif
-        addREF(C->getArgOperand(arg));
+        if (isConstantValue(argument)) // skip constant arugment
+          continue;
+        addREF(argument);
       }
 
       if (!callToVoidFunction(C)) {
