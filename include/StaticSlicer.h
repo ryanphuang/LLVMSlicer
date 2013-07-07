@@ -309,8 +309,8 @@ namespace llvm { namespace slicing {
           for (ExitsVec::const_iterator e = E.begin(); e != E.end(); ++e) {
 #ifdef DEBUG_EMIT
             errs() << "    add return statement: ";
-#endif
             (*e)->dump();
+#endif
             std::set<const llvm::Value *> R;
             detail::getRelevantVarsAtExit(*c, *e, relBgn, relEnd,
                 std::inserter(R, R.end()));
