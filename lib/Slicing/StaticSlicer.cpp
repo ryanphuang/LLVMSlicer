@@ -183,10 +183,16 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
 
   void StaticSlicer::computeSlice() {
     typedef SmallVector<const Function *, 20> WorkList;
-    typedef SmallSet<const Function *, 20> WorkSet;
     WorkList Q(initFuns);
     WorkList ALL;
-    errs() << "pass 1\n";
+
+    // Backward:  DOWN*(UP*({C}))
+    // Forward:   UP*(DOWN*({C}))
+
+    // Phase 1
+    //   Backward:  UP*({C})
+    //   Forward:   DOWN*({C})
+
     while (!Q.empty()) {
       for (WorkList::iterator f = Q.begin(); f != Q.end(); ++f) {
         FunctionStaticSlicer *fss = getFSS(*f);
@@ -196,11 +202,16 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
       }
       WorkList tmp;
       for (WorkList::iterator f = Q.begin(); f != Q.end(); ++f) {
-        emitToCalls(*f, std::inserter(tmp, tmp.end()));
+        if (!ApplyForward)
+          emitToCalls(*f, std::inserter(tmp, tmp.end()));
+        else
+          emitToForwardExits(*f, std::inserter(tmp, tmp.end()));
       }
       std::swap(tmp,Q);
     }
-    errs() << "pass 2\n";
+    // Phase 2
+    //     Backward: DOWN*(XXX)
+    //     Forward:  UP*(XXX)
     while (!ALL.empty()) {
       for (WorkList::iterator f = ALL.begin(); f != ALL.end(); ++f) {
         FunctionStaticSlicer *fss = getFSS(*f);
@@ -209,33 +220,14 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
       }
       WorkList tmp;
       for (WorkList::iterator f = ALL.begin(); f != ALL.end(); ++f) {
-        emitToExits(*f, std::inserter(tmp, tmp.end()));
+        if (!ApplyForward)
+          emitToExits(*f, std::inserter(tmp, tmp.end()));
+        else
+          emitToForwardCalls(*f, std::inserter(tmp, tmp.end()));
       }
       std::swap(tmp,ALL);
     }
 
-    /*
-    while (!Q.empty()) {
-      for (WorkList::iterator f = Q.begin(); f != Q.end(); ++f) {
-        FunctionStaticSlicer *fss = getFSS(*f);
-        fss->calculateStaticSlice();
-        fss->dump(matcher, OutputLine);
-      }
-
-      WorkList tmp;
-      for (WorkList::iterator f = Q.begin(); f != Q.end(); ++f) {
-        if (!ApplyForward) {
-          emitToCalls(*f, std::inserter(tmp, tmp.end()));
-          emitToExits(*f, std::inserter(tmp, tmp.end()));
-        }
-        else {
-          emitToForwardExits(*f, std::inserter(tmp, tmp.end()));
-          emitToForwardCalls(*f, std::inserter(tmp, tmp.end()));
-        }
-      }
-      std::swap(tmp,Q);
-    }
-    */
   }
 
   bool StaticSlicer::sliceModule() {
