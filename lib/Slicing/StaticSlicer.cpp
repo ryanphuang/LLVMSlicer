@@ -198,7 +198,15 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
         FunctionStaticSlicer *fss = getFSS(*f);
         fss->calculateStaticSlice();
         fss->dump(matcher, OutputLine);
-        ALL.push_back(*f);
+        bool included = false;
+        for (WorkList::iterator AI = ALL.begin(), AE = ALL.end(); AI != AE; ++AI) {
+          if (*AI == *f) {
+            included = true;
+            break;
+          }
+        }
+        if (!included)
+          ALL.push_back(*f);
       }
       WorkList tmp;
       for (WorkList::iterator f = Q.begin(); f != Q.end(); ++f) {
@@ -209,6 +217,7 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
       }
       std::swap(tmp,Q);
     }
+    
     // Phase 2
     //     Backward: DOWN*(XXX)
     //     Forward:  UP*(XXX)

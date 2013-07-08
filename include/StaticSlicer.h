@@ -17,7 +17,7 @@
 #include "LLVM.h"
 #include "LLVMSupport.h"
 
-#define DEBUG_EMIT
+// #define DEBUG_EMIT
 
 namespace llvm { namespace slicing {
 
