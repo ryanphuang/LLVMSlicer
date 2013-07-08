@@ -68,10 +68,21 @@ namespace llvm { namespace slicing { namespace detail {
 }}}
 
 namespace llvm { namespace slicing {
+  typedef SmallVector<const Function *, 20> WorkList;
   
-  void StaticSlicer::parseInitialCriterion()
+  static bool setAdd(WorkList &list, const Function * elem)
   {
-
+    bool included = false;
+    for (WorkList::iterator WI = list.begin(), WE = list.end(); WI != WE; ++WI) {
+      if (*WI == elem) {
+        included = true;
+        break;
+      }
+    }
+    if (!included) {
+      list.push_back(elem);
+    }
+    return !included;
   }
 
   void StaticSlicer::buildDicts(const ptr::PointsToSets &PS)
@@ -108,8 +119,14 @@ namespace llvm { namespace slicing {
   StaticSlicer::StaticSlicer(ModulePass *MP, Module &M,
       const ptr::PointsToSets &PS,
       const callgraph::Callgraph &CG,
-      const mods::Modifies &MOD) : mp(MP), module(M),
-slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD), matcher(M) {
+      const mods::Modifies &MOD) : mp(MP), module(M), slicers(), initFuns(), 
+    funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD), matcher(M) {
+    parseCriteria();
+    buildDicts(ps);
+  }
+
+  void StaticSlicer::parseCriteria()
+  {
     Matcher::sp_iterator si = matcher.setSourceFile(FileName);
     if (si == matcher.sp_end()) {
       errs() << "No matching subprogram at " << FileName << ":" << LineNumber << " found\n";
@@ -129,7 +146,7 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
     bool found = false;
     errs() << "Matching instruction: \n";
     while ((inst = matcher.matchInstruction(ii, F, scope)) != NULL) {
-      InsInfo * insInfo = new InsInfo(inst, PS, mod);
+      InsInfo * insInfo = new InsInfo(inst, ps, mod);
       if (ApplyForward) {
         ValSet::const_iterator ci, ce;
         for (ci = insInfo->DEF_begin(), ce = insInfo->DEF_end(); ci != ce; ci++) {
@@ -160,8 +177,8 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
     }
     initFuns.push_back(F);
     slicers.insert(Slicers::value_type(F, FSS));
-    buildDicts(ps);
   }
+
 
   StaticSlicer::~StaticSlicer() {
     for (Slicers::const_iterator I = slicers.begin(), E = slicers.end();
@@ -182,8 +199,8 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
   }
 
   void StaticSlicer::computeSlice() {
-    typedef SmallVector<const Function *, 20> WorkList;
     WorkList Q(initFuns);
+    WorkList P;
     WorkList ALL;
 
     // Backward:  DOWN*(UP*({C}))
@@ -197,16 +214,10 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
       for (WorkList::iterator f = Q.begin(); f != Q.end(); ++f) {
         FunctionStaticSlicer *fss = getFSS(*f);
         fss->calculateStaticSlice();
-        fss->dump(matcher, OutputLine);
-        bool included = false;
-        for (WorkList::iterator AI = ALL.begin(), AE = ALL.end(); AI != AE; ++AI) {
-          if (*AI == *f) {
-            included = true;
-            break;
-          }
-        }
-        if (!included)
+        // fss->dump(matcher, OutputLine);
+        if (setAdd(P, *f)) {
           ALL.push_back(*f);
+        }
       }
       WorkList tmp;
       for (WorkList::iterator f = Q.begin(); f != Q.end(); ++f) {
@@ -221,22 +232,27 @@ slicers(), initFuns(), funcsToCalls(), callsToFuncs(), ps(PS), cg(CG), mod(MOD),
     // Phase 2
     //     Backward: DOWN*(XXX)
     //     Forward:  UP*(XXX)
-    while (!ALL.empty()) {
-      for (WorkList::iterator f = ALL.begin(); f != ALL.end(); ++f) {
+    while (!P.empty()) {
+      for (WorkList::iterator f = P.begin(); f != P.end(); ++f) {
         FunctionStaticSlicer *fss = getFSS(*f);
         fss->calculateStaticSlice();
-        fss->dump(matcher, OutputLine);
+        // fss->dump(matcher, OutputLine);
+        setAdd(ALL, *f);
       }
       WorkList tmp;
-      for (WorkList::iterator f = ALL.begin(); f != ALL.end(); ++f) {
+      for (WorkList::iterator f = P.begin(); f != P.end(); ++f) {
         if (!ApplyForward)
           emitToExits(*f, std::inserter(tmp, tmp.end()));
         else
           emitToForwardCalls(*f, std::inserter(tmp, tmp.end()));
       }
-      std::swap(tmp,ALL);
+      std::swap(tmp,P);
     }
 
+    for (WorkList::iterator f = ALL.begin(); f != ALL.end(); ++f) {
+      FunctionStaticSlicer *fss = getFSS(*f);
+      fss->dump(matcher, OutputLine);
+    }
   }
 
   bool StaticSlicer::sliceModule() {

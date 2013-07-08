@@ -19,6 +19,8 @@ namespace llvm { namespace slicing {
 
 typedef llvm::SmallSetVector<const llvm::Value *, 10> ValSet;
 
+void printVal(const llvm::Value *val);
+
 class InsInfo {
 public:
   InsInfo(const llvm::Instruction *i, const llvm::ptr::PointsToSets &PS,
@@ -125,16 +127,9 @@ public:
 			   const llvm::Value *cond = 0, bool deslice = true) {
     InsInfo *ii = getInsInfo(ins);
     if (cond) {
-// #ifdef DEUBG_RC
-      errs() << "\tAdd initial RC: ";
-      /*
-      if (cond->hasName())
-        errs() << cond->getName() << "\n";
-      else
-        cond->dump();
-      */
-      cond->dump();
-// #endif
+      errs() << "Add initial RC: ";
+      printVal(cond);
+      errs() << "\n";
       ii->addRC(cond);
     }
     ii->deslice();

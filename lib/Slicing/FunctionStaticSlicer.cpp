@@ -49,14 +49,12 @@ using namespace llvm::slicing;
 // #define DEBUG_INSTINFO
 // #define DEBUG_DUMP
 
-#ifdef DEBUG_RC
-static void printVal(const Value *val) {
+void slicing::printVal(const Value *val) {
   if (val->hasName())
     errs() << val->getName();
   else
     val->print(errs());
 }
-#endif
 
 InsInfo::InsInfo(const Instruction *i, const ptr::PointsToSets &PS,
     const mods::Modifies &MOD) : ins(i), sliced(true) {

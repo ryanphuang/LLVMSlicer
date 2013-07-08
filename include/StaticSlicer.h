@@ -36,6 +36,7 @@ namespace llvm { namespace slicing {
 
       ~StaticSlicer();
 
+      void parseCriteria();
       void computeSlice();
       bool sliceModule();
 
