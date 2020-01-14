@@ -22,5 +22,8 @@ include_directories(${LLVM_INCLUDE_DIRS})
 
 # enable_testing()
 
-add_subdirectory(src)
+include_directories(include)
+include_directories(lib)
+
+add_subdirectory(lib)
 # add_subdirectory(test)

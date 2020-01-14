@@ -39,7 +39,8 @@ public:
 
   void analyze(PostDominatorTree &postDominatorTree) {
 #ifdef CONTROL_DEPENDENCE_GRAPH
-    calculate(postDominatorTree, F);
+    // TODO: upgrade
+    calculate(postDominatorTree, F); // F is from caller runOnFunction(F)
 #else
     this->Roots = postDominatorTree.getRoots();
     if (const DomTreeNode *Root = postDominatorTree.getRootNode()) {

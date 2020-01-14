@@ -1,5 +1,3 @@
-include_directories(.)
-
 add_library(LLVMWeiserSlicer SHARED
 	Kleerer.cpp
 	ModStats.cpp
