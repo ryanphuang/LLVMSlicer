@@ -1,14 +1,15 @@
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/Pass.h"
-#include "llvm/PassManager.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/TypeBuilder.h"
-#include "llvm/Analysis/Verifier.h"
-#include "llvm/Bitcode/ReaderWriter.h"
-#include "llvm/Support/InstIterator.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "Callgraph/Callgraph.h"
@@ -18,27 +19,26 @@
 using namespace llvm;
 
 namespace {
-  class KleererPass : public ModulePass {
-  public:
-    static char ID;
+class KleererPass : public ModulePass {
+public:
+  static char ID;
 
-    KleererPass() : ModulePass(ID) { }
+  KleererPass() : ModulePass(ID) {}
 
-    virtual bool runOnModule(Module &M);
+  bool runOnModule(Module &M) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.setPreservesAll();
-      AU.addRequired<DataLayout>();
-    }
-  };
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.setPreservesAll();
+  }
+};
 }
 
 class Kleerer {
 public:
-  Kleerer(ModulePass &modPass, Module &M, DataLayout &TD,
-          callgraph::Callgraph &CG) : modPass(modPass),
-      M(M), TD(TD), CG(CG), C(M.getContext()), intPtrTy(TD.getIntPtrType(C)),
-      done(false) {
+  Kleerer(ModulePass &modPass, Module &M, const DataLayout &TD,
+          callgraph::Callgraph &CG)
+      : modPass(modPass), M(M), TD(TD), CG(CG), C(M.getContext()),
+        intPtrTy(TD.getIntPtrType(C)), done(false) {
     voidPtrType = TypeBuilder<void *, false>::get(C);
     size_tType = TypeBuilder<size_t, false>::get(C);
     intType = TypeBuilder<int, false>::get(C);
@@ -50,7 +50,7 @@ public:
 private:
   ModulePass &modPass;
   Module &M;
-  DataLayout &TD;
+  const DataLayout &TD;
   callgraph::Callgraph &CG;
   LLVMContext &C;
   IntegerType *intPtrTy;
@@ -88,7 +88,7 @@ char KleererPass::ID;
 
 static void check(Value *Func, ArrayRef<Value *> Args) {
   FunctionType *FTy =
-    cast<FunctionType>(cast<PointerType>(Func->getType())->getElementType());
+      cast<FunctionType>(cast<PointerType>(Func->getType())->getElementType());
 
   assert((Args.size() == FTy->getNumParams() ||
           (FTy->isVarArg() && Args.size() > FTy->getNumParams())) &&
@@ -108,7 +108,7 @@ static void check(Value *Func, ArrayRef<Value *> Args) {
   }
 }
 
-static unsigned getTypeSize(DataLayout &TD, Type *type) {
+static unsigned getTypeSize(const DataLayout &TD, Type *type) {
   if (type->isFunctionTy()) /* it is not sized, weird */
     return TD.getPointerSize();
 
@@ -123,25 +123,25 @@ static unsigned getTypeSize(DataLayout &TD, Type *type) {
 
 Instruction *Kleerer::createMalloc(BasicBlock *BB, Type *type,
                                    unsigned typeSize, Value *arraySize) {
-  return CallInst::CreateMalloc(BB, intPtrTy, type,
-                                ConstantInt::get(intPtrTy, typeSize),
-                                arraySize);
+  return CallInst::CreateMalloc(BB, intPtrTy, type, 
+      ConstantInt::get(intPtrTy, typeSize), arraySize, nullptr, "");
 }
 
 static Constant *getGlobalString(LLVMContext &C, Module &M,
                                  const StringRef &str) {
   Constant *strArray = ConstantDataArray::getString(C, str);
-  GlobalVariable *strVar =
-        new GlobalVariable(M, strArray->getType(), true,
-                           GlobalValue::PrivateLinkage, strArray, "");
-  strVar->setUnnamedAddr(true);
+  GlobalVariable *strVar = new GlobalVariable(
+      M, strArray->getType(), true, GlobalValue::PrivateLinkage, strArray, "");
+  strVar->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   strVar->setAlignment(1);
 
   std::vector<Value *> params;
-  params.push_back(ConstantInt::get(TypeBuilder<types::i<32>, true>::get(C), 0));
-  params.push_back(ConstantInt::get(TypeBuilder<types::i<32>, true>::get(C), 0));
+  params.push_back(
+      ConstantInt::get(TypeBuilder<types::i<32>, true>::get(C), 0));
+  params.push_back(
+      ConstantInt::get(TypeBuilder<types::i<32>, true>::get(C), 0));
 
-  return ConstantExpr::getInBoundsGetElementPtr(strVar, params);
+  return ConstantExpr::getInBoundsGetElementPtr(nullptr, strVar, params);
 }
 
 Instruction *Kleerer::call_klee_make_symbolic(Constant *name, BasicBlock *BB,
@@ -161,8 +161,8 @@ Instruction *Kleerer::call_klee_make_symbolic(Constant *name, BasicBlock *BB,
   else {
     size = ConstantInt::get(size_tType, typeSize);
     if (arraySize)
-      size = BinaryOperator::CreateMul(arraySize, size,
-                                     "make_symbolic_size", BB);
+      size =
+          BinaryOperator::CreateMul(arraySize, size, "make_symbolic_size", BB);
   }
 
   p.push_back(size);
@@ -178,35 +178,36 @@ Instruction *Kleerer::call_klee_make_symbolic(Constant *name, BasicBlock *BB,
  */
 void Kleerer::makeGlobalsSymbolic(Module &M, BasicBlock *BB) {
   Constant *zero = ConstantInt::get(intType, 0);
-  for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-      I != E; ++I) {
+  for (Module::global_iterator I = M.global_begin(), E = M.global_end(); I != E;
+       ++I) {
     GlobalVariable &GV = *I;
     if (GV.isConstant() || !GV.hasName())
-	continue;
+      continue;
     StringRef GVName = GV.getName();
     if (GVName.startswith("llvm."))
-	    continue;
+      continue;
     if (GVName.startswith("__ai_") && !GVName.startswith("__ai_state_"))
-	    continue;
-/*    errs() << "TU " << GVName << " ";
-    GV.getType()->getElementType()->dump();
-    errs() << "\n\t" << GVName << "\n";*/
+      continue;
+    /*    errs() << "TU " << GVName << " ";
+          GV.getType()->getElementType()->dump();
+          errs() << "\n\t" << GVName << "\n";*/
     Constant *glob_str = getGlobalString(C, M, GVName);
-    BB->getInstList().push_back(call_klee_make_symbolic(glob_str, BB,
-		GV.getType()->getElementType(), &GV));
+    BB->getInstList().push_back(call_klee_make_symbolic(
+        glob_str, BB, GV.getType()->getElementType(), &GV));
     if (GVName.startswith("__ai_state_"))
-	new StoreInst(zero, &GV, "", true, BB);
+      new StoreInst(zero, &GV, "", true, BB);
   }
 }
 
-Constant *Kleerer::get_assert_fail()
-{
+Constant *Kleerer::get_assert_fail() {
   Type *constCharPtrTy = TypeBuilder<const char *, false>::get(C);
-  AttributeSet attrs = AttributeSet().addAttribute(C,
-		  AttributeSet::FunctionIndex, Attribute::NoReturn);
+  // modified by jiangg 2015.07.31
+  llvm::AttributeSet attrs = llvm::AttributeSet().addAttribute(
+      C, llvm::AttributeSet::FunctionIndex, llvm::Attribute::NoReturn);
+
   return M.getOrInsertFunction("__assert_fail", attrs, Type::getVoidTy(C),
                                constCharPtrTy, constCharPtrTy, uintType,
-                               constCharPtrTy, NULL);
+                               constCharPtrTy, nullptr);
 }
 
 BasicBlock *Kleerer::checkAiState(Function *mainFun, BasicBlock *BB,
@@ -226,7 +227,7 @@ BasicBlock *Kleerer::checkAiState(Function *mainFun, BasicBlock *BB,
   Value *sum = zero;
 
   for (Module::global_iterator I = M->global_begin(), E = M->global_end();
-      I != E; ++I) {
+       I != E; ++I) {
     GlobalVariable &ai_state = *I;
     if (!ai_state.hasName() || !ai_state.getName().startswith("__ai_state_"))
       continue;
@@ -240,9 +241,9 @@ BasicBlock *Kleerer::checkAiState(Function *mainFun, BasicBlock *BB,
   return finalBB;
 }
 
-void Kleerer::addGlobals(Module &mainMod) {
-  for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-       I != E; ++I) {
+void Kleerer::addGlobals(Module & /*mainMod*/) {
+  for (Module::global_iterator I = M.global_begin(), E = M.global_end(); I != E;
+       ++I) {
     GlobalVariable &G = *I;
     if (!G.isDeclaration() || G.hasInitializer())
       continue;
@@ -253,17 +254,17 @@ void Kleerer::addGlobals(Module &mainMod) {
 
 struct st_desc {
   unsigned long flag;
-#define STF_ONE  1
+#define STF_ONE 1
 };
 
 static const struct st_desc *getStDesc(const Type *elemTy) {
   typedef std::map<std::string, struct st_desc> StructMap;
 
   static const StructMap::value_type structMapData[] = {
-    StructMap::value_type("pci_dev", (struct st_desc){ STF_ONE }),
+      StructMap::value_type("pci_dev", (struct st_desc){STF_ONE}),
   };
 
-  #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
   static const StructMap structMap(structMapData,
                                    structMapData + ARRAY_SIZE(structMapData));
@@ -277,7 +278,7 @@ static const struct st_desc *getStDesc(const Type *elemTy) {
         return &I->second;
     }
 
-  return NULL;
+  return nullptr;
 }
 
 Instruction *Kleerer::mallocSymbolic(BasicBlock *BB, Constant *name,
@@ -297,7 +298,7 @@ Value *Kleerer::handlePtrArg(BasicBlock *mainBB, Constant *name,
   Type *elemTy = PT->getElementType();
   const struct st_desc *st_desc = getStDesc(elemTy);
   unsigned typeSize = getTypeSize(TD, elemTy);
-  Value *arrSize = NULL;
+  Value *arrSize = nullptr;
   if (!st_desc || !(st_desc->flag & STF_ONE)) {
     unsigned count = (1 << 20) / typeSize;
     if (count > 4096)
@@ -311,8 +312,8 @@ Value *Kleerer::handlePtrArg(BasicBlock *mainBB, Constant *name,
     bool cast = ins->getType() != voidPtrType;
     if (cast)
       insList.push_back(ins = new BitCastInst(ins, voidPtrType));
-    ins = GetElementPtrInst::CreateInBounds(ins,
-           ConstantInt::get(TypeBuilder<types::i<64>, true>::get(C), 2048));
+    ins = GetElementPtrInst::CreateInBounds(
+        ins, ConstantInt::get(TypeBuilder<types::i<64>, true>::get(C), 2048));
     insList.push_back(ins);
     if (cast)
       insList.push_back(ins = new BitCastInst(ins, PT));
@@ -336,9 +337,9 @@ void Kleerer::prepareArguments(Function &F, BasicBlock *mainBB,
     type->print(errs());
     errs() << "\n";
 #endif
-    Value *val = NULL;
-    Constant *name = getGlobalString(C, M, param.hasName() ? param.getName() :
-                                     "noname");
+    Value *val = nullptr;
+    Constant *name =
+        getGlobalString(C, M, param.hasName() ? param.getName() : "noname");
     if (PointerType *PT = dyn_cast<PointerType>(type)) {
       val = handlePtrArg(mainBB, name, PT);
     } else if (IntegerType *IT = dyn_cast<IntegerType>(type)) {
@@ -354,9 +355,11 @@ void Kleerer::prepareArguments(Function &F, BasicBlock *mainBB,
 }
 
 void Kleerer::writeMain(Function &F) {
-  std::string name = M.getModuleIdentifier() + ".main." + F.getName().str() + ".o";
-  Function *mainFun = Function::Create(TypeBuilder<int(), false>::get(C),
-                    GlobalValue::ExternalLinkage, "main", &M);
+  std::string name =
+      M.getModuleIdentifier() + ".main." + F.getName().str() + ".o";
+  Function *mainFun =
+      Function::Create(TypeBuilder<int(), false>::get(C),
+                       GlobalValue::ExternalLinkage, "main", &M);
   BasicBlock *mainBB = BasicBlock::Create(C, "entry", mainFun);
 
   FunctionType *klee_make_symbolicTy =
@@ -365,15 +368,15 @@ void Kleerer::writeMain(Function &F) {
       M.getOrInsertFunction("klee_make_symbolic", klee_make_symbolicTy));
   /* if there was one, it should have the same type, i.e. we got Function */
   assert(klee_make_symbolic);
-/*  Function *klee_int = Function::Create(
-              TypeBuilder<int(const char *), false>::get(C),
-              GlobalValue::ExternalLinkage, "klee_int", &M);*/
+  /*  Function *klee_int = Function::Create(
+      TypeBuilder<int(const char *), false>::get(C),
+      GlobalValue::ExternalLinkage, "klee_int", &M);*/
 
-//  F.dump();
+  //  F.dump();
 
   std::vector<Value *> params;
   prepareArguments(F, mainBB, params);
-//  mainFun->viewCFG();
+  //  mainFun->viewCFG();
 
   makeGlobalsSymbolic(M, mainBB);
   addGlobals(M);
@@ -385,31 +388,34 @@ void Kleerer::writeMain(Function &F) {
   check(&F, params);
 
   CallInst::Create(&F, params, "", mainBB);
-  BasicBlock *final = checkAiState(mainFun, mainBB, F.back().back().getDebugLoc());
-  ReturnInst::Create(C, ConstantInt::get(mainFun->getReturnType(), 0),
-                     final);
+  BasicBlock * final =
+      checkAiState(mainFun, mainBB, F.back().back().getDebugLoc());
+  ReturnInst::Create(C, ConstantInt::get(mainFun->getReturnType(), 0), final);
 
 #ifdef DEBUG_WRITE_MAIN
   mainFun->viewCFG();
 #endif
 
-  std::string ErrorInfo;
-  raw_fd_ostream out(name.c_str(), ErrorInfo);
-  if (!ErrorInfo.empty()) {
-    errs() << __func__ << ": cannot write '" << name << "'!\n";
-    return;
-  }
+  std::error_code ErrorInfo;
+  raw_fd_ostream out(llvm::StringRef(name.c_str()), ErrorInfo,
+                     sys::fs::OpenFlags());
+  // should check ErrorInfo?
 
-//  errs() << mainMod;
+  //  if (!ErrorInfo.empty()) {
+  //    errs() << __func__ << ": cannot write '" << name << "'!\n";
+  //    return;
+  //  }
 
-  PassManager Passes;
+  //  errs() << mainMod;
+
+  legacy::PassManager Passes;
   Passes.add(createVerifierPass());
   Passes.run(M);
 
   WriteBitcodeToFile(&M, out);
   errs() << __func__ << ": written: '" << name << "'\n";
   mainFun->eraseFromParent();
-//  done = true;
+  //  done = true;
 }
 
 bool Kleerer::run() {
@@ -425,13 +431,16 @@ bool Kleerer::run() {
   assert(initFuns && "No initial functions found. Did you run -prepare?");
 
   for (ConstantArray::const_op_iterator I = initFuns->op_begin(),
-       E = initFuns->op_end(); I != E; ++I) {
+                                        E = initFuns->op_end();
+       I != E; ++I) {
     const ConstantExpr *CE = cast<ConstantExpr>(&*I);
     assert(CE->getOpcode() == Instruction::BitCast);
     Function &F = *cast<Function>(CE->getOperand(0));
 
-    callgraph::Callgraph::const_iterator II, EE;
-    llvm::tie(II, EE) = CG.calls(&F);
+    llvm::callgraph::Callgraph::range_iterator range = CG.calls(&F);
+    callgraph::Callgraph::const_iterator II = range.first;
+    callgraph::Callgraph::const_iterator EE = range.second;
+
     for (; II != EE; ++II) {
       const Function *callee = (*II).second;
       if (callee == F__assert_fail) {
@@ -446,7 +455,10 @@ bool Kleerer::run() {
 }
 
 bool KleererPass::runOnModule(Module &M) {
-  DataLayout &TD = getAnalysis<DataLayout>();
+  // jiangg 2016.04.20
+  // const DataLayout &TD =
+  // this->getAnalysis<llvm::DataLayoutPass>().getDataLayout();
+  const DataLayout &TD = M.getDataLayout();
   ptr::PointsToSets PS;
   {
     ptr::ProgramStructure P(M);

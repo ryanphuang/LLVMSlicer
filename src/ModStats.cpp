@@ -1,11 +1,11 @@
 // This file is distributed under the University of Illinois Open Source
 // License. See LICENSE.TXT for details.
 
-#include "llvm/IR/Instructions.h"
-#include "llvm/Pass.h"
-#include "llvm/IR/Module.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Support/InstIterator.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "Callgraph/Callgraph.h"
@@ -15,27 +15,28 @@
 using namespace llvm;
 
 namespace {
-  class ModStats : public ModulePass {
-  public:
-    static char ID;
+class ModStats : public ModulePass {
+public:
+  static char ID;
 
-    ModStats() : ModulePass(ID) { }
+  ModStats() : ModulePass(ID) {}
 
-    virtual bool runOnModule(Module &M);
+  virtual bool runOnModule(Module &M);
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.setPreservesAll();
-      AU.addRequired<LoopInfo>();
-    }
-  };
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    AU.setPreservesAll();
+    AU.addRequired<LoopInfoWrapperPass>();
+  }
+};
 }
 
 class FunInfo {
 public:
-  FunInfo(const Function &F) : F(F), ins(0), _hasAsm(false), _hasCall(false),
-          _hasExternalCall(false), _hasLock(false), _hasLoop(false),
-          _hasNestedAsm(false), _hasNestedExtCall(false), _hasNestedLock(false),
-          _hasNestedLoop(false) {}
+  FunInfo(const Function &F)
+      : F(F), ins(0), _hasAsm(false), _hasCall(false), _hasExternalCall(false),
+        _hasLock(false), _hasLoop(false), _hasNestedAsm(false),
+        _hasNestedExtCall(false), _hasNestedLock(false), _hasNestedLoop(false) {
+  }
 
   const Function &getFun() const { return F; }
 
@@ -57,7 +58,9 @@ public:
   bool hasLock() const { return _hasLock; }
   bool hasLoop() const { return _hasLoop; }
   bool hasNestedAsm() const { return _hasAsm || _hasNestedAsm; }
-  bool hasNestedExtCall() const { return _hasExternalCall || _hasNestedExtCall; }
+  bool hasNestedExtCall() const {
+    return _hasExternalCall || _hasNestedExtCall;
+  }
   bool hasNestedLock() const { return _hasLock || _hasNestedLock; }
   bool hasNestedLoop() const { return _hasLoop || _hasNestedLoop; }
 
@@ -80,10 +83,11 @@ class ModInfo {
 public:
   typedef std::map<const Function *, FunInfo *> FunMap;
 
-  ModInfo(const Module &M) : M(M), ins(0), fun(0), funWithAsm(0),
-          funWithCall(0), funWithExtCall(0), funWithLock(0), funWithLoop(0),
-          funWithNestedAsm(0), funWithNestedExtCall(0), funWithNestedLock(0),
-          funWithNestedLoop(0), funSafe(0), funSafeWOLoop(0) {}
+  ModInfo(const Module &M)
+      : M(M), ins(0), fun(0), funWithAsm(0), funWithCall(0), funWithExtCall(0),
+        funWithLock(0), funWithLoop(0), funWithNestedAsm(0),
+        funWithNestedExtCall(0), funWithNestedLock(0), funWithNestedLoop(0),
+        funSafe(0), funSafeWOLoop(0) {}
 
   void inline addIns(unsigned ins) { this->ins += ins; }
   void inline incFun() { fun++; }
@@ -140,18 +144,17 @@ private:
   void handleIns(FunInfo &funInfo, const Instruction &ins);
 };
 
-static RegisterPass<ModStats> X("modstats", "Prints out some stats about module");
+static RegisterPass<ModStats> X("modstats",
+                                "Prints out some stats about module");
 char ModStats::ID;
 
 void ModInfo::dump() const {
   errs() << "Module " << M.getModuleIdentifier() << " dump\n";
-  errs() << "  machine code: " << M.getModuleIdentifier() << " " << ins <<
-    " " << fun << " " <<
-    funWithAsm << " " << funWithNestedAsm << " " <<
-    funWithExtCall << " " << funWithNestedExtCall << " " <<
-    funWithLock << " " << funWithNestedLock << " " <<
-    funWithLoop << " " << funWithNestedLoop << " " <<
-    funSafe << " " << funSafeWOLoop << "\n";
+  errs() << "  machine code: " << M.getModuleIdentifier() << " " << ins << " "
+         << fun << " " << funWithAsm << " " << funWithNestedAsm << " "
+         << funWithExtCall << " " << funWithNestedExtCall << " " << funWithLock
+         << " " << funWithNestedLock << " " << funWithLoop << " "
+         << funWithNestedLoop << " " << funSafe << " " << funSafeWOLoop << "\n";
   errs() << "  instructions: " << ins << "\n";
   errs() << "  functions: " << fun << "\n";
   errs() << "    with asm: " << funWithAsm << "\n";
@@ -168,13 +171,13 @@ void ModInfo::dump() const {
 
 static bool isLockingFun(StringRef name) {
   return name.startswith("_spin_lock") || name.startswith("_spin_unlock") ||
-    name.startswith("_spin_trylock") ||
-    name.startswith("_read_lock") || name.startswith("_read_unlock") ||
-    name.startswith("_read_trylock") ||
-    name.startswith("_write_lock") || name.startswith("_write_unlock") ||
-    name.startswith("_write_trylock") ||
-    name.equals("mutex_lock") || name.equals("mutex_unlock") ||
-    name.equals("mutex_lock_interruptible") || name.equals("mutex_trylock");
+         name.startswith("_spin_trylock") || name.startswith("_read_lock") ||
+         name.startswith("_read_unlock") || name.startswith("_read_trylock") ||
+         name.startswith("_write_lock") || name.startswith("_write_unlock") ||
+         name.startswith("_write_trylock") || name.equals("mutex_lock") ||
+         name.equals("mutex_unlock") ||
+         name.equals("mutex_lock_interruptible") ||
+         name.equals("mutex_trylock");
 }
 
 void StatsComputer::handleIns(FunInfo &funInfo, const Instruction &ins) {
@@ -198,8 +201,8 @@ void StatsComputer::handleIns(FunInfo &funInfo, const Instruction &ins) {
           return;
         if (called->isDeclaration()) {
 #ifdef DEBUG_EXT
-          errs() << "EXT1 " << ins.getParent()->getParent()->getName() <<
-            " to " << called->getName() << "\n";
+          errs() << "EXT1 " << ins.getParent()->getParent()->getName() << " to "
+                 << called->getName() << "\n";
 #endif
           funInfo.setHasExternalCall();
         }
@@ -265,10 +268,11 @@ void StatsComputer::run() {
 
 #ifdef DEBUG_DUMP_CALLREL
   for (callgraph::Callgraph::const_iterator I = CG.begin_closure(),
-		  E = CG.end_closure(); I != E; ++I) {
-	  const Function *from = I->first;
-	  const Function *to = I->second;
-	  errs() << "CALLREL " << from->getName() << " => " << to->getName() << "\n";
+                                            E = CG.end_closure();
+       I != E; ++I) {
+    const Function *from = I->first;
+    const Function *to = I->second;
+    errs() << "CALLREL " << from->getName() << " => " << to->getName() << "\n";
   }
 #endif
 
@@ -276,20 +280,22 @@ void StatsComputer::run() {
     Function &F = *I;
     if (F.isDeclaration())
       continue;
-    handleFun(modInfo, F, modPass.getAnalysis<LoopInfo>(F));
+    handleFun(modInfo, F,
+              modPass.getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo());
   }
 
   const ConstantArray *initFuns = getInitFuns(M);
   assert(initFuns && "No initial functions found. Did you run -prepare?");
 
   for (ConstantArray::const_op_iterator I = initFuns->op_begin(),
-       E = initFuns->op_end(); I != E; ++I) {
+                                        E = initFuns->op_end();
+       I != E; ++I) {
     const ConstantExpr *CE = cast<ConstantExpr>(&*I);
     assert(CE->getOpcode() == Instruction::BitCast);
     const Function &F = *cast<Function>(CE->getOperand(0));
     FunInfo *funInfo = modInfo.getFunInfo(&F);
     callgraph::Callgraph::const_iterator II, EE;
-    llvm::tie(II, EE) = CG.calls(&F);
+    std::tie(II, EE) = CG.calls(&F);
 #ifdef DEBUG_NESTED
     errs() << "at " << F.getName() << " flags [" << getFlags(funInfo) << "]\n";
 #endif
@@ -297,8 +303,8 @@ void StatsComputer::run() {
       const Function *called = II->second;
       const FunInfo *calledFunInfo = modInfo.getFunInfo(called);
 #ifdef DEBUG_NESTED
-      errs() << "  " << called->getName() << " [" << getFlags(calledFunInfo) <<
-          "]\n";
+      errs() << "  " << called->getName() << " [" << getFlags(calledFunInfo)
+             << "]\n";
 #endif
       if (calledFunInfo->hasAsm())
         funInfo->setHasNestedAsm();
@@ -348,5 +354,5 @@ void StatsComputer::run() {
 bool ModStats::runOnModule(Module &M) {
   StatsComputer sc(*this, M);
   sc.run();
-	return false;
+  return false;
 }

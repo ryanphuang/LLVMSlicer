@@ -1,6 +1,6 @@
-set(LLVM_LINK_COMPONENTS core engine bitwriter)
+include_directories(.)
 
-add_llvm_loadable_module(LLVMSlicer
+add_library(LLVMWeiserSlicer SHARED
 	Kleerer.cpp
 	ModStats.cpp
 	Slicing/FunctionStaticSlicer.cpp

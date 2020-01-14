@@ -1,29 +1,26 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.4.3)
+project(llvm-slicer)
 
-find_package(LLVM)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Define add_llvm_* macro's.
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED on)
+
+# Must turn off rtti with -fno-rtti
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti -g -std=c++11 -Wall -Wextra -Wno-unused-parameter")
+
+find_package(LLVM REQUIRED CONFIG)
+
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+
+list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
-
-llvm_replace_compiler_option(CMAKE_CXX_FLAGS "-frtti" "-fno-rtti")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x")
 
 add_definitions(${LLVM_DEFINITIONS})
 include_directories(${LLVM_INCLUDE_DIRS})
-link_directories(${LLVM_LIBRARY_DIRS})
 
-find_path(LLVM_SRC_PATH include/llvm/Module.h)
-find_path(LLVM_BUILD_PATH include/llvm/Intrinsics.gen)
-
-if (LLVM_SRC_PATH)
-  include_directories(${LLVM_SRC_PATH}/include)
-endif(LLVM_SRC_PATH)
-if (LLVM_BUILD_PATH)
-  include_directories(${LLVM_BUILD_PATH}/include)
-  link_directories(${LLVM_BUILD_PATH}/lib)
-endif(LLVM_BUILD_PATH)
-
-enable_testing()
+# enable_testing()
 
 add_subdirectory(src)
-add_subdirectory(test)
+# add_subdirectory(test)

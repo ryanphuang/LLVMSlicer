@@ -12,8 +12,8 @@ static inline const llvm::ConstantArray *getInitFuns(const llvm::Module &M) {
   const llvm::GlobalVariable *initFunsVar =
       M.getGlobalVariable("__ai_init_functions", true);
 
-  if (!initFunsVar)
-    return NULL;
+  if (nullptr == initFunsVar)
+    return nullptr;
 
   const llvm::ConstantArray *initFuns =
       llvm::dyn_cast<llvm::ConstantArray>(initFunsVar->getInitializer());

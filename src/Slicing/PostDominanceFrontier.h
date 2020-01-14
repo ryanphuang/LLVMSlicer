@@ -1,76 +1,114 @@
-//
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
-
 #ifndef POST_DOMINANCE_FRONTIER
 #define POST_DOMINANCE_FRONTIER
 
-#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/DominanceFrontier.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
+#include "llvm/InitializePasses.h"
 
 namespace llvm {
 
-  struct CreateHammockCFG : public FunctionPass {
-    static char ID;
+struct CreateHammockCFG : public FunctionPass {
+  static char ID;
 
-    CreateHammockCFG() : FunctionPass(ID) { }
+  CreateHammockCFG() : FunctionPass(ID) {}
 
-    virtual bool runOnFunction(Function &F);
+  bool runOnFunction(Function &F) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.addRequired<LoopInfo>();
-    }
-  };
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<LoopInfoWrapperPass>();
+  }
+};
 
-  /// PostDominanceFrontier Class - Concrete subclass of DominanceFrontier that is
-  /// used to compute the a post-dominance frontier.
-  ///
-  struct PostDominanceFrontier : public DominanceFrontierBase {
-    static char ID;
-    PostDominanceFrontier()
-      : DominanceFrontierBase(ID, true) { }
+//===-------------------------------------
+/// PostDominanceFrontierBase Class - Concrete subclass of DominanceFrontierBase
+/// that is
+/// used to compute a post dominator frontiers.
+///
+template <class BlockT>
+class PostDominanceFrontierBase : public DominanceFrontierBase<BlockT> {
+private:
+  using BlockTraits = GraphTraits<BlockT *>;
 
-    virtual bool runOnFunction(Function &F) {
-      Frontiers.clear();
-      PostDominatorTree &DT = getAnalysis<PostDominatorTree>();
+public:
+  // using DomTreeT = DominatorTreeBase<BlockT>;	// why not Post
+  using DomTreeNodeT = DomTreeNodeBase<BlockT>;
+  using DomSetType = typename DominanceFrontierBase<BlockT>::DomSetType;
+
+  PostDominanceFrontierBase() : DominanceFrontierBase<BlockT>(false) {}
+
+  void analyze(PostDominatorTree &postDominatorTree) {
 #ifdef CONTROL_DEPENDENCE_GRAPH
-      calculate(DT, F);
+    calculate(postDominatorTree, F);
 #else
-      Roots = DT.getRoots();
-      if (const DomTreeNode *Root = DT.getRootNode()) {
-        calculate(DT, Root);
+    this->Roots = postDominatorTree.getRoots();
+    if (const DomTreeNode *Root = postDominatorTree.getRootNode()) {
+      calculate(postDominatorTree, Root);
 #ifdef PDF_DUMP
-	errs() << "=== DUMP:\n";
-	dump();
-	errs() << "=== EOD\n";
+      errs() << "=== DUMP:\n";
+      dump();
+      errs() << "=== EOD\n";
 #endif
-      }
+    }
 #endif
-      return false;
-    }
+  }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.setPreservesAll();
-      AU.addRequired<PostDominatorTree>();
-    }
-
-  private:
 #ifdef CONTROL_DEPENDENCE_GRAPH
-    typedef std::pair<DomTreeNode *, DomTreeNode *> Ssubtype;
-    typedef std::set<Ssubtype> Stype;
+  typedef std::pair<DomTreeNode *, DomTreeNode *> Ssubtype;
+  typedef std::set<Ssubtype> Stype;
 
-    void calculate(const PostDominatorTree &DT, Function &F);
-    void constructS(const PostDominatorTree &DT, Function &F, Stype &S);
-    const DomTreeNode *findNearestCommonDominator(const PostDominatorTree &DT,
-		    DomTreeNode *A, DomTreeNode *B);
+  void calculate(const PostDominatorTree &DT, Function &F);
+  void constructS(const PostDominatorTree &DT, Function &F, Stype &S);
+  const DomTreeNode *findNearestCommonDominator(const PostDominatorTree &DT,
+                                                DomTreeNode *A, DomTreeNode *B);
 #else
-    const DomSetType &calculate(const PostDominatorTree &DT,
-                                const DomTreeNode *Node);
+  const DomSetType &calculate(const PostDominatorTree &DT,
+                              const DomTreeNodeT *Node);
 #endif
-  };
+};
+
+class PostDominanceFrontier : public FunctionPass {
+private:
+  PostDominanceFrontierBase<BasicBlock> Base;
+
+public:
+  using DomSetType = DominanceFrontierBase<BasicBlock>::DomSetType;
+  using iterator = DominanceFrontierBase<BasicBlock>::iterator;
+  using const_iterator = DominanceFrontierBase<BasicBlock>::const_iterator;
+
+  static char ID;
+
+  PostDominanceFrontier() : FunctionPass(ID), Base() {
+    initializeDominanceFrontierWrapperPassPass(*PassRegistry::getPassRegistry());
+  }
+
+  iterator begin() { return Base.begin(); }
+
+  const_iterator begin() const { return Base.begin(); }
+
+  iterator end() { return Base.end(); }
+
+  const_iterator end() const { return Base.end(); }
+
+  iterator find(BasicBlock *pBasicBlock) { return Base.find(pBasicBlock); }
+
+  const_iterator find(BasicBlock *pBasicBlock) const {
+    return Base.find(pBasicBlock);
+  }
+
+  void releaseMemory() override { Base.releaseMemory(); }
+
+  bool runOnFunction(Function &) override {
+    releaseMemory();
+    Base.analyze(getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree());
+    return false;
+  }
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.setPreservesAll();
+    AU.addRequired<PostDominatorTreeWrapperPass>();
+  }
+};
 }
 
 #endif

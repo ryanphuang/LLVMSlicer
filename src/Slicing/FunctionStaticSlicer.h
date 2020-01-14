@@ -7,15 +7,23 @@
 #include <map>
 #include <utility> /* pair */
 
-#include "llvm/IR/Value.h"
 #include "llvm/ADT/SetVector.h"
-#include "llvm/Support/InstIterator.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Value.h"
 
-#include "../PointsTo/PointsTo.h"
 #include "../Modifies/Modifies.h"
+#include "../PointsTo/PointsTo.h"
 #include "PostDominanceFrontier.h"
 
-namespace llvm { namespace slicing {
+namespace shape {
+enum class RWType {
+  STATE_CACHE,
+  TRANS,
+};
+}
+
+namespace llvm {
+namespace slicing {
 
 typedef llvm::SmallSetVector<llvm::ptr::PointsToSets::Pointee, 10> ValSet;
 
@@ -24,8 +32,14 @@ private:
   typedef llvm::ptr::PointsToSets::Pointee Pointee;
 
 public:
+  // 2015.10.20 by jiangg
+  // for RWset analysis (liveness analysis)
+  // change interface on 2016.01.14
+  InsInfo(shape::RWType type, const llvm::Instruction *i,
+          const llvm::ptr::PointsToSets &PS, const llvm::mods::Modifies &MOD);
+
   InsInfo(const llvm::Instruction *i, const llvm::ptr::PointsToSets &PS,
-                   const llvm::mods::Modifies &MOD);
+          const llvm::mods::Modifies &MOD);
 
   const Instruction *getIns() const { return ins; }
 
@@ -45,18 +59,22 @@ public:
 
 private:
   void addDEFArray(const ptr::PointsToSets &PS, const Value *V,
-      uint64_t lenConst);
+                   uint64_t lenConst);
   void addREFArray(const ptr::PointsToSets &PS, const Value *V,
-      uint64_t lenConst);
+                   uint64_t lenConst);
   void handleVariousFuns(const ptr::PointsToSets &PS, const CallInst *C,
-      const Function *F);
+                         const Function *F);
 
-  const llvm::Instruction *ins;
+  void _analyseCallInst(shape::RWType type, const CallInst &C,
+                        const ptr::PointsToSets &PS, const mods::Modifies &MOD);
+
+  const llvm::Instruction *ins = nullptr;
   ValSet RC, DEF, REF;
-  bool sliced;
+  bool sliced = true;
 };
 
 class FunctionStaticSlicer {
+private:
   typedef llvm::ptr::PointsToSets::Pointee Pointee;
 
 public:
@@ -64,11 +82,13 @@ public:
 
   FunctionStaticSlicer(llvm::Function &F, llvm::ModulePass *MP,
                        const llvm::ptr::PointsToSets &PT,
-		       const llvm::mods::Modifies &mods) :
-	  fun(F), MP(MP) {
+                       const llvm::mods::Modifies &mods)
+      : fun(F), MP(MP) {
     for (llvm::inst_iterator I = llvm::inst_begin(F), E = llvm::inst_end(F);
-	 I != E; ++I)
-      insInfoMap.insert(InsInfoMap::value_type(&*I, new InsInfo(&*I, PT, mods)));
+         I != E; ++I) {
+      insInfoMap.insert(
+          InsInfoMap::value_type(&*I, new InsInfo(&*I, PT, mods)));
+    }
   }
   ~FunctionStaticSlicer();
 
@@ -86,9 +106,9 @@ public:
     return getInsInfo(I)->REF_end();
   }
 
-  template<typename FwdValueIterator>
+  template <typename FwdValueIterator>
   bool addCriterion(const llvm::Instruction *ins, FwdValueIterator b,
-		    FwdValueIterator const e, bool desliceIfChanged = false) {
+                    FwdValueIterator const e, bool desliceIfChanged = false) {
     InsInfo *ii = getInsInfo(ins);
     bool change = false;
     for (; b != e; ++b)
@@ -100,8 +120,9 @@ public:
   }
 
   void addInitialCriterion(const llvm::Instruction *ins,
-			   const Pointee &cond = Pointee(0, 0),
-			   bool deslice = true) {
+                           const Pointee &cond = Pointee(0, 0),
+                           bool deslice = true) {
+    (void)deslice;
     InsInfo *ii = getInsInfo(ins);
     if (cond.first)
       ii->addRC(cond);
@@ -111,9 +132,7 @@ public:
   bool slice();
   static void removeUndefs(ModulePass *MP, Function &F);
 
-  void addSkipAssert(const llvm::CallInst *CI) {
-    skipAssert.insert(CI);
-  }
+  void addSkipAssert(const llvm::CallInst *CI) { skipAssert.insert(CI); }
 
   bool shouldSkipAssert(const llvm::CallInst *CI) {
     return skipAssert.count(CI);
@@ -152,7 +171,7 @@ private:
 
 bool findInitialCriterion(llvm::Function &F, FunctionStaticSlicer &ss,
                           bool startingFunction = false);
-
-}}
+}
+}
 
 #endif
