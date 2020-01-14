@@ -1,3 +1,4 @@
++=========Original Repository==========+
 LLVM slicer
 -----------
 
@@ -33,3 +34,20 @@ References
 [1] M. Weiser. "Program slicing". Proceedings of the 5th International
 Conference on Software Engineering, pages 439–449, IEEE Computer Society Press,
 March 1981.
+
+
++=========This Forked Branch==========+
+Changes/enhancement made in the branch:
+* Port to LLVM make build system and LLVM 3.0
+* The input of the slicer can now accept <filename, line number, variable> tuple as 
+  the slicing criterion. It will output the final slice.
+  Example:
+  opt -load Debug+Asserts/lib/LLVMSlicer.so -criterion-file="b.c" -criterion-line=13 -criterion-variable="sum" -slice-inter b.ll
+  opt -load Debug+Asserts/lib/LLVMSlicer.so -criterion-file="d.c" -criterion-line=11 -criterion-variable="product" -forward-slice -slice-inter -output-line d.ll
+* add forward slicing 
+* fix the calling context problems
+* provide more options
+* rewrite code
+
+Contact ryanhuang@cs.ucsd.edu for the specific changes above
+

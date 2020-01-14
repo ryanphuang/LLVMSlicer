@@ -9,4 +9,6 @@ add_library(LLVMWeiserSlicer SHARED
 	Languages/LLVM.cpp
 	Modifies/Modifies.cpp
 	PointsTo/PointsTo.cpp
+  Matcher/Scope.cpp
+  #  Matcher/Matcher.cpp
 )
